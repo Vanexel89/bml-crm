@@ -182,25 +182,26 @@ function parseBitrixRoutes(portStr, destStr) {
 }
 
 function parseBitrixLeads(rows) {
+  const s = v => v == null ? "" : String(v);
   return rows.map(r => {
-    const name = r["Название лида"] || r["Название компании"] || "";
+    const name = s(r["Название лида"] || r["Название компании"]);
     if (!name || !name.trim()) return null;
     const vol = parseVolume(r["Количество ктк в месяц NEW"] || r["Кол-во ктк"]);
-    const allPhones = (r["Рабочий телефон"] || "").split(",").map(s => s.trim()).filter(Boolean);
-    const mobilePhones = (r["Мобильный телефон"] || "").split(",").map(s => s.trim()).filter(Boolean);
+    const allPhones = s(r["Рабочий телефон"]).split(",").map(x => x.trim()).filter(Boolean);
+    const mobilePhones = s(r["Мобильный телефон"]).split(",").map(x => x.trim()).filter(Boolean);
     const phones = [...allPhones, ...mobilePhones].slice(0, 5);
-    const workEmails = (r["Рабочий e-mail"] || "").split(",").map(s => s.trim()).filter(Boolean);
-    const privEmails = (r["Частный e-mail"] || "").split(",").map(s => s.trim()).filter(Boolean);
+    const workEmails = s(r["Рабочий e-mail"]).split(",").map(x => x.trim()).filter(Boolean);
+    const privEmails = s(r["Частный e-mail"]).split(",").map(x => x.trim()).filter(Boolean);
     const emails = [...workEmails, ...privEmails].slice(0, 5);
     const inn = r["ИНН"] ? String(r["ИНН"]).replace(/\.0$/, "").trim() : "";
     const contactName = [r["Имя"], r["Фамилия"]].filter(x => x && String(x).trim()).join(" ").trim();
-    const dest = r["Пункт назначения NEW"] || "";
-    const origin = r["Порт отправления NEW"] || "";
+    const dest = s(r["Пункт назначения NEW"]);
+    const origin = s(r["Порт отправления NEW"]);
     const routes = parseBitrixRoutes(origin, dest);
-    const source = r["Источник"] || "";
-    const comment = r["Комментарий"] || "";
-    const objections = r["Возражения"] || "";
-    const website = (r["Корпоративный сайт"] || "").split(",")[0].trim();
+    const source = s(r["Источник"]);
+    const comment = s(r["Комментарий"]);
+    const objections = s(r["Возражения"]);
+    const website = s(r["Корпоративный сайт"]).split(",")[0].trim();
     const cleanName = name.replace(/^(ООО|АО|ЗАО|ПАО|ИП)\s*/i, "").replace(/"/g, "").trim();
     const hasOurDest = dest.toLowerCase().includes("москва") || dest.toLowerCase().includes("петербург");
     return {
@@ -1871,7 +1872,7 @@ function SettingsTab({ settings, customAuto, up, onLogout }) {
       <div style={{ ...C.card, marginTop: 10 }}>
         <div style={{ fontWeight: 600, marginBottom: 10 }}>Почта (SMTP)</div>
         <div style={{ fontSize: 12, color: "var(--color-text-secondary)", marginBottom: 8 }}>
-          SMTP настроен на сервере. {serverInfo?.smtp ? <span style={{ color: "#3B6D11" }}>✓ Подключен</span> : <span style={{ color: "#A32D2D" }}>✗ Не настроен</span>}
+          SMTP настроен на сервере. {serverInfo?.smtp ? <span style={{ color: "#3B6D11" }}>✓ Подключен ({serverInfo.smtpUser})</span> : serverInfo?.smtpError ? <span style={{ color: "#A32D2D" }}>✗ Ошибка: {serverInfo.smtpError}</span> : <span style={{ color: "#A32D2D" }}>✗ Не настроен ({serverInfo?.smtpUser})</span>}
         </div>
         <div style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
           <div style={{ flex: 1 }}><div style={C.lbl}>Тестовое письмо</div><input style={C.inp} value={testEmail} onChange={e => setTestEmail(e.target.value)} placeholder="test@email.com" onKeyDown={e => e.key === "Enter" && sendTestEmail()} /></div>
