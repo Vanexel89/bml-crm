@@ -1,0 +1,1928 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BML Sales Panel</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', system-ui, -apple-system, sans-serif; background: #f8f8f7; }
+    :root {
+      --color-text-primary: #1a1a1a;
+      --color-text-secondary: #666;
+      --color-text-tertiary: #999;
+      --color-text-info: #1a73e8;
+      --color-text-danger: #d32f2f;
+      --color-background-primary: #ffffff;
+      --color-background-secondary: #f5f5f4;
+      --color-background-tertiary: #f0efee;
+      --color-background-danger: #fef2f2;
+      --color-border-secondary: #ddd;
+      --color-border-tertiary: #e8e7e5;
+      --color-border-info: #90caf9;
+    }
+    #root { min-height: 100vh; }
+    .login-screen { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; gap: 16px; padding: 20px; }
+    .login-screen h1 { font-size: 24px; font-weight: 700; }
+    .login-screen input { padding: 10px 14px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; width: 300px; }
+    .login-screen button { padding: 10px 24px; border: none; border-radius: 8px; background: #1a1a1a; color: white; font-size: 14px; cursor: pointer; }
+    .login-screen .error { color: #d32f2f; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- CDN deps -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+  <script type="text/babel" data-type="module">
+    // React globals
+    const { useState, useEffect, useCallback, useMemo, useRef } = React;
+
+    // ─── API LAYER ───
+    // API key stored in browser localStorage (entered once)
+    function getApiKey() { return localStorage.getItem("bml-api-key") || ""; }
+    function setApiKey(k) { localStorage.setItem("bml-api-key", k); }
+
+    async function apiCall(method, path, body) {
+      const key = getApiKey();
+      const opts = {
+        method,
+        headers: { "Content-Type": "application/json", "X-API-Key": key },
+      };
+      if (body !== undefined) opts.body = JSON.stringify(body);
+      const res = await fetch(path, opts);
+      if (res.status === 401) throw new Error("AUTH");
+      return res.json();
+    }
+
+    async function load(key, fb = []) {
+      try {
+        const r = await apiCall("GET", "/api/kv/" + encodeURIComponent(key));
+        return r.value ? JSON.parse(r.value) : fb;
+      } catch (e) {
+        if (e.message === "AUTH") throw e;
+        return fb;
+      }
+    }
+
+    async function save(key, data) {
+      try {
+        await apiCall("PUT", "/api/kv/" + encodeURIComponent(key), { value: JSON.stringify(data) });
+      } catch (e) { console.error("Save error:", e); }
+    }
+
+    // ─── LOGIN SCREEN ───
+    function LoginScreen({ onLogin }) {
+      const [key, setKey] = useState(getApiKey());
+      const [err, setErr] = useState("");
+      const [loading, setLoading] = useState(false);
+
+      const tryLogin = async () => {
+        if (!key.trim()) return;
+        setLoading(true);
+        setErr("");
+        setApiKey(key.trim());
+        try {
+          const res = await fetch("/api/health", {
+            headers: { "X-API-Key": key.trim() }
+          });
+          if (res.status === 401) { setErr("Неверный ключ"); setLoading(false); return; }
+          const data = await res.json();
+          if (data.ok) onLogin();
+          else setErr("Сервер не отвечает");
+        } catch (e) { setErr("Ошибка подключения: " + e.message); }
+        setLoading(false);
+      };
+
+      // Auto-login if key exists
+      useEffect(() => {
+        if (key) tryLogin();
+      }, []);
+
+      return (
+        <div className="login-screen">
+          <h1>BML Sales Panel</h1>
+          <p style={{ color: "#666", fontSize: 13 }}>Введите API ключ для доступа</p>
+          <input
+            type="password"
+            placeholder="API ключ..."
+            value={key}
+            onChange={e => setKey(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && tryLogin()}
+          />
+          <button onClick={tryLogin} disabled={loading}>
+            {loading ? "Проверка..." : "Войти"}
+          </button>
+          {err && <div className="error">{err}</div>}
+        </div>
+      );
+    }
+
+    // ─── CRM CODE ───
+
+const KEYS = { leads: "bml-v3-leads", rates: "bml-v3-rates", proposals: "bml-v3-proposals", activities: "bml-v3-activities", touches: "bml-v3-touches", patterns: "bml-v3-patterns", freight: "bml-v3-freight", boxes: "bml-v3-boxes", drops: "bml-v3-drops", railway: "bml-v3-railway", autoMsk: "bml-v3-automsk", settings: "bml-v3-settings", customAuto: "bml-v3-customauto" };
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const today = () => new Date().toISOString().split("T")[0];
+const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x.toISOString().split("T")[0]; };
+const fmt = d => { if (!d) return "—"; const dt = new Date(d); if (isNaN(dt.getTime())) return String(d).slice(0, 12); return dt.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" }); };
+const fmtFull = d => { if (!d) return "—"; const dt = new Date(d); if (isNaN(dt.getTime())) return String(d).slice(0, 20); return dt.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" }); };
+const weekAgo = () => addDays(today(), -7);
+
+
+
+
+const STATUS = { new: { l: "Новый", c: "#6B7280", bg: "#F3F4F6" }, contact: { l: "Контакт", c: "#0F6E56", bg: "#E1F5EE" }, qualified: { l: "Квалиф.", c: "#185FA5", bg: "#E6F1FB" }, proposal_sent: { l: "КП отпр.", c: "#534AB7", bg: "#EEEDFE" }, negotiation: { l: "Перегов.", c: "#D85A30", bg: "#FAECE7" }, won: { l: "Выигран", c: "#3B6D11", bg: "#EAF3DE" }, lost: { l: "Проигран", c: "#A32D2D", bg: "#FCEBEB" }, frozen: { l: "Заморожен", c: "#888780", bg: "#F1EFE8" } };
+const GRADE = { A: { l: "A", c: "#3B6D11", bg: "#EAF3DE" }, B: { l: "B", c: "#854F0B", bg: "#FAEEDA" }, C: { l: "C", c: "#A32D2D", bg: "#FCEBEB" } };
+const TOUCHES_TPL = [
+  { n: 1, type: "call", label: "Холодный звонок", day: 0, desc: "Знакомство, потребность" },
+  { n: 2, type: "proposal", label: "Отправка КП", day: 1, desc: "Актуальная ставка" },
+  { n: 3, type: "call", label: "Фоллоу-ап", day: 3, desc: "Получили? Вопросы?" },
+  { n: 4, type: "email", label: "Email ценность", day: 7, desc: "Кейс, аналитика" },
+  { n: 5, type: "proposal", label: "Новое предложение", day: 14, desc: "Обновлённая ставка" },
+  { n: 6, type: "call", label: "Финальная попытка", day: 21, desc: "Прямой вопрос" },
+];
+
+function calcGrade(v) {
+  const vol = v.volume_monthly || 0;
+  const rm = v.routes_match || "unknown";
+  const pt = v.payment_terms || "unknown";
+  if (vol >= 3 && rm !== "no" && pt !== "deferred") return "A";
+  if (vol >= 1 && rm !== "no") return "B";
+  return "C";
+}
+
+function parseVolume(str) { if (!str) return 0; const m = String(str).match(/(\d+)/); return m ? parseInt(m[1]) : 0; }
+
+function parseBitrixRoutes(portStr, destStr) {
+  const routes = [];
+  if (!portStr && !destStr) return routes;
+  const dests = destStr ? destStr.split(",").map(s => s.trim()).filter(Boolean) : [""];
+  if (portStr) {
+    const parts = portStr.split(",").map(s => s.trim()).filter(Boolean);
+    parts.forEach(p => {
+      const m = p.match(/^(.+?)\s*,?\s*([A-Z]{2})?\s*(\d{2}|\d{2}['']?\w*)?$/i);
+      if (m) {
+        const port = m[1].trim();
+        const ctype = m[3] ? (m[3].includes("40") ? "40HC" : "20'") : "40HC";
+        dests.forEach(d => routes.push({ port: port.replace(/\s*,\s*[A-Z]{2}$/i, ""), city: d, ctype }));
+      } else {
+        dests.forEach(d => routes.push({ port: p, city: d, ctype: "40HC" }));
+      }
+    });
+  } else {
+    dests.forEach(d => routes.push({ port: "", city: d, ctype: "40HC" }));
+  }
+  // Deduplicate
+  const seen = new Set();
+  return routes.filter(r => { const k = `${r.port}|${r.city}|${r.ctype}`; if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 20);
+}
+
+function parseBitrixLeads(rows) {
+  return rows.map(r => {
+    const name = r["Название лида"] || r["Название компании"] || "";
+    if (!name || !name.trim()) return null;
+    const vol = parseVolume(r["Количество ктк в месяц NEW"] || r["Кол-во ктк"]);
+    const allPhones = (r["Рабочий телефон"] || "").split(",").map(s => s.trim()).filter(Boolean);
+    const mobilePhones = (r["Мобильный телефон"] || "").split(",").map(s => s.trim()).filter(Boolean);
+    const phones = [...allPhones, ...mobilePhones].slice(0, 5);
+    const workEmails = (r["Рабочий e-mail"] || "").split(",").map(s => s.trim()).filter(Boolean);
+    const privEmails = (r["Частный e-mail"] || "").split(",").map(s => s.trim()).filter(Boolean);
+    const emails = [...workEmails, ...privEmails].slice(0, 5);
+    const inn = r["ИНН"] ? String(r["ИНН"]).replace(/\.0$/, "").trim() : "";
+    const contactName = [r["Имя"], r["Фамилия"]].filter(x => x && String(x).trim()).join(" ").trim();
+    const dest = r["Пункт назначения NEW"] || "";
+    const origin = r["Порт отправления NEW"] || "";
+    const routes = parseBitrixRoutes(origin, dest);
+    const source = r["Источник"] || "";
+    const comment = r["Комментарий"] || "";
+    const objections = r["Возражения"] || "";
+    const website = (r["Корпоративный сайт"] || "").split(",")[0].trim();
+    const cleanName = name.replace(/^(ООО|АО|ЗАО|ПАО|ИП)\s*/i, "").replace(/"/g, "").trim();
+    const hasOurDest = dest.toLowerCase().includes("москва") || dest.toLowerCase().includes("петербург");
+    return {
+      company_name: cleanName || name, company_name_full: name, inn, volume_monthly: vol,
+      routes_match: dest ? (hasOurDest ? "yes" : "partial") : "unknown",
+      payment_terms: "unknown",
+      contact_name: contactName,
+      phones_raw: phones, emails_raw: emails,
+      phones_contact: [], emails_kp: [],
+      website, routes,
+      source: source.toLowerCase().includes("глобус") || source.toLowerCase().includes("globus") ? "exhibition" : source.toLowerCase().includes("повтор") ? "repeat" : "cold",
+      source_detail: source, comment, objections,
+    };
+  }).filter(Boolean);
+}
+
+// ─── RATE PARSERS ───
+const VALID_POLS = ['SHANGHAI','NINGBO','QINGDAO','TIANJIN','XINGANG','YANTIAN','NANSHA','XIAMEN','SHEKOU','RIZHAO','DALIAN','TAICANG','BUSAN','LAEM CHA BANG','PORT KLANG'];
+const isPol = s => { const u = (s||"").toUpperCase(); return VALID_POLS.some(p => u.includes(p)) || /^[A-Z]{3,}/.test(u.replace(/[^A-Z ]/g,'')); };
+const num = v => { const n = Number(v); return isNaN(n) ? 0 : n; };
+const parseRange = s => { if (!s) return 0; const m = String(s).match(/(\d+)\s*[-–]\s*(\d+)/); if (m) return Math.round((parseInt(m[1])+parseInt(m[2]))/2); return num(s); };
+const normCity = c => { if (!c) return ""; const u = c.toUpperCase().trim(); const map = {"MOSCOW":"Москва","ST-PETERSBURG":"Санкт-Петербург","EKATERINBURG":"Екатеринбург","NOVOSIBIRSK":"Новосибирск","KRASNOYARSK":"Красноярск","VLADIVOSTOK":"Владивосток","NAHODKA":"Находка","VLADIVOSTOK/VRANGEL":"Владивосток","ROSTOV-ON-DON":"Ростов-на-Дону","IRKUTZK":"Иркутск","KAZAN":"Казань","PENZA":"Пенза","NIZHNY NOVGOROD":"Нижний Новгород","CHELYABINSK":"Челябинск","TOGLIATTI":"Тольятти","KHABAROVSK":"Хабаровск"}; return map[u] || c.trim(); };
+const normPol = p => { if (!p) return ""; let u = p.toUpperCase().trim(); if (u.includes("XINGANG")) return "TIANJIN (XINGANG)"; return u; };
+const dateStr = v => { if (!v) return ""; if (typeof v === 'number' && v > 40000 && v < 60000) { const d = new Date((v - 25569) * 86400000); return d.toISOString().split("T")[0]; } if (v instanceof Date || (typeof v === 'object' && v.getTime)) return v.toISOString().split("T")[0]; const s = String(v); const m = s.match(/(\d{4})-(\d{2})-(\d{2})/); if (m) return m[0]; const m2 = s.match(/(\d{2})\.(\d{2})\.(\d{4})/); if (m2) return `${m2[3]}-${m2[2]}-${m2[1]}`; return s; };
+
+// Parse validity strings like "с 05.03.2026 -15.04.2026", "16.03.2026 - 31.03.2026 по кс", "с 16.03.2026", "c 01.10.24 до уведомления"
+function parseValidity(s) {
+  if (!s) return null;
+  const str = String(s).trim();
+  // Extract all dates in DD.MM.YYYY or DD.MM.YY format
+  const dateMatches = [...str.matchAll(/(\d{1,2})\.(\d{1,2})\.(\d{2,4})/g)];
+  if (dateMatches.length === 0) return null;
+  const toIso = (m) => {
+    let y = parseInt(m[3]); if (y < 100) y += 2000;
+    const mm = m[2].padStart(2, "0"); const dd = m[1].padStart(2, "0");
+    return `${y}-${mm}-${dd}`;
+  };
+  const from = toIso(dateMatches[0]);
+  const to = dateMatches.length >= 2 ? toIso(dateMatches[1]) : null;
+  return { from, to };
+}
+
+// Check if a date (ISO string) falls within a validity range
+function dateInRange(dateIso, validity) {
+  if (!dateIso || !validity) return true; // no date or no validity = assume ok
+  const d = dateIso.slice(0, 10);
+  if (validity.from && d < validity.from) return false;
+  if (validity.to && d > validity.to) return false;
+  return true;
+}
+
+function parseRateExcel(wb, XLSX) {
+  // Fuzzy sheet finder - skips hidden rows
+  const findSheet = (keyword) => {
+    const name = wb.SheetNames.find(n => n.toLowerCase().includes(keyword.toLowerCase()));
+    if (!name) return [];
+    const ws = wb.Sheets[name];
+    if (!ws) return [];
+    const allRows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, blankrows: true });
+    const hiddenRows = ws['!rows'] || [];
+    return allRows.filter((_, i) => !hiddenRows[i]?.hidden);
+  };
+
+  // 1. FREIGHT (Фрахт ДВ)
+  const fr = findSheet('Фрахт');
+  const freight = [];
+  for (let i = 2; i < fr.length; i++) {
+    const r = fr[i]; if (!r || !r[0]) continue;
+    const service = String(r[0]||"").trim();
+    const line = String(r[2]||"").trim();
+    const polRaw = String(r[3]||"").trim();
+    if (!polRaw || !isPol(polRaw)) continue;
+    const pols = polRaw.includes(",") ? polRaw.split(",").map(s=>s.trim()).filter(Boolean) : [polRaw];
+    // 0-based: J=9, K=10, L=11, M=12, N=13(transship), O=14(terminal), P=15(departure), Q=16(validity), R=17(comment)
+    const soc20 = num(r[9]); const soc40 = num(r[10]);
+    const coc20 = num(r[11]); const coc40 = num(r[12]);
+    const transship = String(r[13]||"").trim();
+    const terminalName = String(r[14]||"").trim();
+    const departure = dateStr(r[15]);
+    const validity = String(r[16]||"").trim();
+    const comment = String(r[17]||"").trim();
+    const hasSoc = soc20 > 0 || soc40 > 0;
+    const hasCoc = coc20 > 0 || coc40 > 0;
+    if (!hasSoc && !hasCoc) continue;
+    pols.forEach(pol => {
+      freight.push({ id: uid(), service, line, pol: normPol(pol), soc20, soc40, coc20, coc40, transship, terminal: terminalName, departure, validity, comment, hasSoc, hasCoc });
+    });
+  }
+
+  // 2. BOXES (Ящики)
+  const bx = findSheet('Ящик');
+  const boxes = [];
+  for (let i = 1; i < bx.length; i++) {
+    const r = bx[i]; if (!r || !r[0]) continue;
+    boxes.push({ pol: normPol(String(r[0]||"")), city: normCity(String(r[1]||"")), p20: parseRange(r[3]), p40: parseRange(r[4]), freeTime: String(r[5]||""), penalty: String(r[6]||"") });
+  }
+
+  // 3. DROPS (Дроп)
+  const dr = findSheet('Дроп');
+  const drops = [];
+  for (let i = 1; i < dr.length; i++) {
+    const r = dr[i]; if (!r || !r[2]) continue;
+    const city = normCity(String(r[2]||""));
+    if (!city || city.includes("Город") || city.includes("Регион")) continue;
+    const p20raw = r[7] !== null && r[7] !== undefined ? r[7] : r[4];
+    const p40raw = r[8] !== null && r[8] !== undefined ? r[8] : r[5];
+    const p20 = typeof p20raw === 'string' && p20raw.includes('запрос') ? -1 : num(p20raw);
+    const p40 = typeof p40raw === 'string' && p40raw.includes('запрос') ? -1 : num(p40raw);
+    drops.push({ sc: String(r[0]||"").trim(), line: String(r[1]||"").trim(), city, owner: String(r[3]||"").trim(), p20, p40, freeTime: String(r[9]||""), penalty: String(r[10]||""), validity: String(r[11]||"") });
+  }
+
+  // 4. RAILWAY (ЖД тарифы)
+  const rw = findSheet('ЖД тариф');
+  const railway = [];
+  for (let i = 2; i < rw.length; i++) {
+    const r = rw[i]; if (!r || !r[1]) continue;
+    const city = String(r[3]||"").trim();
+    if (!city) continue;
+    railway.push({
+      serviceType: String(r[0]||"").trim(), terminal: String(r[1]||"").trim(),
+      dispatch: String(r[2]||"").trim(), city: city,
+      stationFrom: String(r[4]||"").trim(), stationTo: String(r[5]||"").trim(),
+      schedule: String(r[6]||"").trim(),
+      p20base: num(r[7]), p20_24t: num(r[8]), p20_28t: num(r[9]),
+      p40base: num(r[10]), p40_28t: num(r[11]),
+      nds: num(r[12]), guard20: num(r[13]), guard40: num(r[14]), guardNds: num(r[15]),
+      validity: String(r[16]||"").trim(), wagonType: String(r[17]||"").trim(), note: String(r[18]||"").trim()
+    });
+  }
+
+  // 5. AUTO MSK (Мск авто)
+  const au = findSheet('Мск авто');
+  const autoMsk = [];
+  let curStation = "";
+  for (let i = 0; i < au.length; i++) {
+    const r = au[i]; if (!r) continue;
+    const v = String(r[0]||"").trim();
+    if (v.startsWith("ст.")) { curStation = v; continue; }
+    if (v.includes("Комплексная") && !v.includes("ВТТ") && curStation) {
+      autoMsk.push({ station: curStation, p20: num(r[1]), p40: num(r[2]) });
+    }
+  }
+
+  return { freight, boxes, drops, railway, autoMsk };
+}
+
+// ─── CALCULATOR LOGIC ───
+// Line name aliases for drop matching
+const DROP_LINE_ALIASES = { "new new shipping": "new new / torgmoll", "new new": "new new / torgmoll" };
+
+function calcChain({ freight, boxes, drops, railway, autoMsk, customAuto, settings }, params) {
+  const { pol, city, ctype, weight } = params;
+  const is20 = ctype === "20";
+  const usdRate = settings?.usdRate || 90;
+  const marginUsd = settings?.marginUsd || 0;
+  const marginRub = settings?.marginRub || 0;
+
+  // 1. Filter freight by POL
+  const matchFreight = freight.filter(f => {
+    const fp = f.pol.toUpperCase();
+    const pp = pol.toUpperCase();
+    return fp === pp || fp.includes(pp) || pp.includes(fp);
+  });
+
+  const results = [];
+  matchFreight.forEach(fr => {
+    const isTranscontainer = fr.service.toLowerCase().includes("трансконтейнер");
+
+    // === ТРАНСКОНТЕЙНЕР special case ===
+    // Freight is in RUB, drop included in railway, use Трансконтейнер terminal for ЖД
+    if (isTranscontainer) {
+      const freightRaw = is20 ? (fr.soc20 || fr.coc20) : (fr.soc40 || fr.coc40);
+      if (!freightRaw || freightRaw <= 0) return;
+
+      // Railway from Трансконтейнер terminal
+      const rwMatches = railway.filter(r => {
+        const rt = r.terminal.toLowerCase();
+        const rc = r.city.trim().toLowerCase();
+        const qc = city.trim().toLowerCase();
+        const cityMatch = rc === qc;
+        return cityMatch && rt.includes("трансконтейнер");
+      });
+      if (rwMatches.length === 0) return;
+
+      const rwPrices = rwMatches.map(r => {
+        let p = is20 ? (weight >= 28 ? (r.p20_28t || r.p20_24t || r.p20base) : weight >= 24 ? (r.p20_24t || r.p20base) : r.p20base) : (weight >= 28 ? (r.p40_28t || r.p40base) : r.p40base);
+        const nds = r.nds > 0 ? p * r.nds : 0;
+        const guard = is20 ? r.guard20 : r.guard40;
+        const guardNds = r.guardNds > 0 ? guard * r.guardNds : 0;
+        return { base: p, total: Math.round(p + nds), guard: Math.round(guard + guardNds), terminal: r.terminal, validity: r.validity };
+      }).filter(p => p.base > 0);
+      if (rwPrices.length === 0) return;
+
+      let avg = [...rwPrices].sort((a, b) => a.total - b.total);
+      if (avg.length > 2) avg = avg.slice(1, -1);
+      const avgRw = Math.round(avg.reduce((s, p) => s + p.total, 0) / avg.length);
+      const avgGuard = Math.round(avg.reduce((s, p) => s + p.guard, 0) / avg.length);
+
+      // Freight is already RUB, no USD conversion
+      const freightRub = freightRaw;
+      const freightWithMarginRub = freightRub + Math.round(marginUsd * usdRate); // margin in RUB equivalent
+
+      // Auto
+      let autoRub = 0, autoLabel = "";
+      const cityLower = city.toLowerCase();
+      if (cityLower.includes("москва")) {
+        const ap = autoMsk.map(a => is20 ? a.p20 : a.p40).filter(v => v > 0);
+        if (ap.length > 0) { let s = [...ap].sort((a,b)=>a-b); if(s.length>2) s=s.slice(1,-1); autoRub = Math.round(s.reduce((a,v)=>a+v,0)/s.length); autoLabel = "Авто Мск (средн.)"; }
+      } else {
+        const ca = (customAuto || []).find(a => a.city.toLowerCase() === cityLower);
+        if (ca) { autoRub = is20 ? ca.p20 : ca.p40; autoLabel = `Авто ${city}`; }
+      }
+
+      const rwWithMargin = avgRw + marginRub;
+      const totalRub = freightWithMarginRub + rwWithMargin + avgGuard + autoRub;
+
+      results.push({
+        id: uid(), line: fr.line, service: fr.service, pol: fr.pol, transship: fr.transship,
+        terminal: fr.terminal, departure: fr.departure, validity: fr.validity, comment: fr.comment,
+        ownerType: "COC (вшит)", freightUsd: 0, boxDropUsd: 0,
+        boxDropLabel: "Дроп вкл. в ЖД", totalFreightUsd: 0,
+        freightWithMargin: 0, freightRub: freightWithMarginRub,
+        freightRubRaw: freightRub, isRubFreight: true,
+        rwBase: avgRw, rwGuard: avgGuard, rwWithMargin, rwTerminal: rwPrices[0]?.terminal, rwValidity: rwPrices[0]?.validity,
+        autoRub, autoLabel, marginUsd, marginRub,
+        marginTotalRub: Math.round(marginUsd * usdRate) + marginRub,
+        totalRub,
+      });
+      return;
+    }
+
+    // === STANDARD case ===
+    const servLower = fr.service.toLowerCase();
+    const lineLower = fr.line.toLowerCase();
+    const termLower = (fr.terminal || "").toLowerCase();
+    const isSquoznoy = servLower.includes("сквозной");
+    const isPortovoy = servLower.includes("портовый");
+    const isPanda = lineLower === "panda";
+
+    // Auto (same for SOC/COC)
+    let autoRub = 0, autoLabel = "";
+    const cityLower = city.toLowerCase();
+    if (cityLower.includes("москва")) {
+      const ap = autoMsk.map(a => is20 ? a.p20 : a.p40).filter(v => v > 0);
+      if (ap.length > 0) { let sorted = [...ap].sort((a,b)=>a-b); if(sorted.length>2) sorted=sorted.slice(1,-1); autoRub = Math.round(sorted.reduce((s,v)=>s+v,0)/sorted.length); autoLabel = "Авто Мск (средн.)"; }
+    } else {
+      const ca = (customAuto || []).find(a => a.city.toLowerCase() === cityLower);
+      if (ca) { autoRub = is20 ? ca.p20 : ca.p40; autoLabel = `Авто ${city}`; }
+    }
+
+    // Helper: find railway matches for given search term
+    const findRw = (searchTerm) => {
+      return railway.filter(r => {
+        const rt = r.terminal.toLowerCase();
+        const rc = r.city.trim().toLowerCase();
+        const qc = city.trim().toLowerCase();
+        const cityMatch = rc === qc || rc.startsWith(qc + " ") || qc.startsWith(rc + " ");
+        if (!cityMatch) return false;
+        return rt.includes(searchTerm) || searchTerm.includes(rt);
+      });
+    };
+
+    // Helper: find railway for this freight + ownerType (SOC/COC)
+    const getRailway = (ownerType) => {
+      let rwMatches;
+      if (isPanda && isSquoznoy) {
+        // PANDA special: SOC → "логопер сквозной soc", COC → service name (логопер сквозной coc / импортеры)
+        if (ownerType === "SOC") {
+          rwMatches = findRw("логопер сквозной soc");
+        } else {
+          // For "Логопер сквозной (импортеры)" service, match exactly
+          if (servLower.includes("импортер")) {
+            rwMatches = findRw("логопер сквозной (импортеры)");
+          } else {
+            rwMatches = findRw("логопер сквозной coc");
+          }
+        }
+      } else if (isSquoznoy) {
+        rwMatches = findRw(servLower);
+      } else if (isPortovoy) {
+        // Match by terminal, try each part of composite terminal
+        rwMatches = railway.filter(r => {
+          const rt = r.terminal.toLowerCase();
+          const rc = r.city.trim().toLowerCase();
+          const qc = city.trim().toLowerCase();
+          if (rc !== qc && !rc.startsWith(qc + " ") && !qc.startsWith(rc + " ")) return false;
+          if (termLower.includes(rt) || rt.includes(termLower)) return true;
+          const parts = termLower.split(/[\/,]/);
+          return parts.some(tp => tp.trim() && (rt.includes(tp.trim()) || tp.trim().includes(rt)));
+        });
+      } else {
+        rwMatches = findRw(servLower);
+        if (rwMatches.length === 0) rwMatches = findRw(termLower);
+      }
+      if (rwMatches.length === 0) return null;
+      const rwPrices = rwMatches.map(r => {
+        let p = is20 ? (weight >= 28 ? (r.p20_28t || r.p20_24t || r.p20base) : weight >= 24 ? (r.p20_24t || r.p20base) : r.p20base) : (weight >= 28 ? (r.p40_28t || r.p40base) : r.p40base);
+        const nds = r.nds > 0 ? p * r.nds : 0;
+        const guard = is20 ? r.guard20 : r.guard40;
+        const guardNds = r.guardNds > 0 ? guard * r.guardNds : 0;
+        return { base: p, total: Math.round(p + nds), guard: Math.round(guard + guardNds), terminal: r.terminal, validity: r.validity };
+      }).filter(p => p.base > 0);
+      if (rwPrices.length === 0) return null;
+      let avg = [...rwPrices].sort((a, b) => a.total - b.total);
+      if (avg.length > 2) avg = avg.slice(1, -1);
+      return {
+        base: Math.round(avg.reduce((s, p) => s + p.total, 0) / avg.length),
+        guard: Math.round(avg.reduce((s, p) => s + p.guard, 0) / avg.length),
+        terminal: rwPrices[0].terminal,
+        validity: rwPrices[0].validity,
+      };
+    };
+
+    // Helper: push result for one option
+    const pushResult = (opt, rw, dateWarnings) => {
+      const freightWithMargin = opt.totalFreightUsd + marginUsd;
+      const rwWithMargin = rw.base + marginRub;
+      const freightRub = Math.round(freightWithMargin * usdRate);
+      const totalRub = freightRub + rwWithMargin + rw.guard + autoRub;
+      const marginTotalRub = Math.round(marginUsd * usdRate) + marginRub;
+      results.push({
+        id: uid(), line: fr.line, service: fr.service, pol: fr.pol, transship: fr.transship,
+        terminal: fr.terminal, departure: fr.departure, validity: fr.validity, comment: fr.comment,
+        ownerType: opt.type, freightUsd: opt.freightUsd, boxDropUsd: opt.boxDropUsd,
+        boxDropLabel: opt.boxDropLabel, totalFreightUsd: opt.totalFreightUsd,
+        freightWithMargin, freightRub, isRubFreight: false,
+        rwBase: rw.base, rwGuard: rw.guard, rwWithMargin, rwTerminal: rw.terminal, rwValidity: rw.validity,
+        autoRub, autoLabel, marginUsd, marginRub, marginTotalRub, totalRub,
+        dateWarnings: dateWarnings || [],
+        dropValidity: opt.dropValidity || "",
+      });
+    };
+
+    // Freight validity check
+    const frVal = parseValidity(fr.validity);
+    const frDepOk = dateInRange(fr.departure, frVal);
+
+    // Build SOC option
+    if ((is20 && fr.soc20 > 0) || (!is20 && fr.soc40 > 0)) {
+      const freightUsd = is20 ? fr.soc20 : fr.soc40;
+      const box = boxes.find(b => {
+        const bp = b.pol.toUpperCase(); const pp = pol.toUpperCase();
+        return (bp === pp || bp.includes(pp) || pp.includes(bp)) && b.city === city;
+      });
+      if (box) {
+        const boxUsd = is20 ? box.p20 : box.p40;
+        const socOpt = { type: "SOC", freightUsd, boxDropUsd: boxUsd, totalFreightUsd: freightUsd + boxUsd, boxDropLabel: "Ящик SOC" };
+        const rw = getRailway("SOC");
+        const warns = [];
+        if (!frDepOk && fr.departure) warns.push("Дата выхода вне валидности фрахта");
+        if (rw) pushResult(socOpt, rw, warns);
+      }
+    }
+
+    // Build COC option
+    if ((is20 && fr.coc20 > 0) || (!is20 && fr.coc40 > 0)) {
+      const freightUsd = is20 ? fr.coc20 : fr.coc40;
+      const aliasLine = DROP_LINE_ALIASES[lineLower] || lineLower;
+
+      // Find all matching drops by line+city
+      const matchingDrops = drops.filter(d => {
+        const dl = d.line.toLowerCase();
+        const cityMatch = d.city === city;
+        if (!cityMatch) return false;
+        return dl.includes(aliasLine) || aliasLine.includes(dl) || dl.includes(lineLower) || lineLower.includes(dl) || dl.includes(servLower) || servLower.includes(dl);
+      });
+      // Add "Любая" fallback
+      if (matchingDrops.length === 0) {
+        const anyDrop = drops.find(d => d.line === "Любая" && d.city === city);
+        if (anyDrop) matchingDrops.push(anyDrop);
+      }
+
+      // Prefer drop whose validity covers departure date
+      let bestDrop = null;
+      let dropDateOk = true;
+      if (matchingDrops.length > 0) {
+        if (fr.departure) {
+          // Try to find a drop valid for this departure
+          const validDrop = matchingDrops.find(d => {
+            const dv = parseValidity(d.validity);
+            return dateInRange(fr.departure, dv);
+          });
+          if (validDrop) {
+            bestDrop = validDrop;
+            dropDateOk = true;
+          } else {
+            bestDrop = matchingDrops[0]; // fallback to first match
+            dropDateOk = false;
+          }
+        } else {
+          bestDrop = matchingDrops[0];
+        }
+      }
+
+      if (bestDrop) {
+        const dropP = is20 ? bestDrop.p20 : bestDrop.p40;
+        if (typeof dropP === 'number' && dropP !== -1) {
+          const totalFreight = freightUsd + dropP;
+          const dropLabel = dropP < 0 ? `Возврат ${Math.abs(dropP)}$` : "Дроп COC";
+          const cocOpt = { type: "COC", freightUsd, boxDropUsd: dropP, totalFreightUsd: totalFreight, boxDropLabel: dropLabel, dropValidity: bestDrop.validity || "" };
+          const rw = getRailway("COC");
+          const warns = [];
+          if (!frDepOk && fr.departure) warns.push("Выход вне валидности фрахта");
+          if (!dropDateOk) warns.push("Выход вне валидности дропа");
+          if (rw) pushResult(cocOpt, rw, warns);
+        }
+      }
+    }
+  });
+
+  return results.sort((a, b) => a.totalRub - b.totalRub);
+}
+
+// ─── UI Components ───
+const Badge = ({ color, bg, children, style: sx }) => (
+  <span style={{ display: "inline-flex", alignItems: "center", padding: "2px 8px", borderRadius: 10, fontSize: 11, fontWeight: 500, color, background: bg || `${color}18`, whiteSpace: "nowrap", lineHeight: 1.5, ...sx }}>{children}</span>
+);
+
+const Chip = ({ children, onRemove, color = "var(--color-text-primary)" }) => (
+  <span style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 8px", borderRadius: 6, fontSize: 11, background: "var(--color-background-secondary)", color, border: "0.5px solid var(--color-border-tertiary)" }}>
+    {children}
+    {onRemove && <span style={{ cursor: "pointer", opacity: 0.5, fontSize: 13, lineHeight: 1 }} onClick={onRemove}>×</span>}
+  </span>
+);
+
+// ─── Styles ───
+const C = {
+  card: { background: "var(--color-background-primary)", border: "0.5px solid var(--color-border-tertiary)", borderRadius: 12, padding: 16, marginBottom: 10 },
+  btn: p => ({ display: "inline-flex", alignItems: "center", gap: 4, padding: "6px 13px", borderRadius: 8, border: p ? "none" : "0.5px solid var(--color-border-secondary)", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: p ? 500 : 400, background: p ? "var(--color-text-primary)" : "var(--color-background-primary)", color: p ? "var(--color-background-primary)" : "var(--color-text-primary)", transition: "all 0.1s" }),
+  inp: { width: "100%", padding: "7px 10px", borderRadius: 8, border: "0.5px solid var(--color-border-tertiary)", fontSize: 12, fontFamily: "inherit", background: "var(--color-background-primary)", color: "var(--color-text-primary)", outline: "none", boxSizing: "border-box" },
+  sel: { padding: "7px 10px", borderRadius: 8, border: "0.5px solid var(--color-border-tertiary)", fontSize: 12, fontFamily: "inherit", background: "var(--color-background-primary)", color: "var(--color-text-primary)", outline: "none", boxSizing: "border-box" },
+  lbl: { fontSize: 11, color: "var(--color-text-secondary)", marginBottom: 3, display: "block", fontWeight: 500, letterSpacing: "0.2px" },
+  tbl: { width: "100%", borderCollapse: "collapse", fontSize: 12 },
+  th: { textAlign: "left", padding: "8px 10px", borderBottom: "1px solid var(--color-border-tertiary)", color: "var(--color-text-tertiary)", fontWeight: 500, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.5px" },
+  td: { padding: "9px 10px", borderBottom: "0.5px solid var(--color-border-tertiary)" },
+  metric: { background: "var(--color-background-primary)", borderRadius: 10, padding: "12px 16px", flex: 1, minWidth: 100, border: "0.5px solid var(--color-border-tertiary)" },
+  empty: { textAlign: "center", padding: "30px 20px", color: "var(--color-text-tertiary)", fontSize: 13 },
+  g3: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 },
+  section: { fontSize: 14, fontWeight: 600, marginBottom: 10, color: "var(--color-text-primary)" },
+};
+
+// ─── MAIN ───
+function App({ onLogout }) {
+  const [tab, setTab] = useState("dashboard");
+  const [data, setData] = useState({ leads: [], rates: [], proposals: [], activities: [], touches: [], patterns: [], freight: [], boxes: [], drops: [], railway: [], autoMsk: [], settings: {}, customAuto: [] });
+  const [ready, setReady] = useState(false);
+  const [sel, setSel] = useState(null);
+  const [kpFromCalc, setKpFromCalc] = useState(null); // bridge: calculator → КП tab
+
+  useEffect(() => {
+    (async () => {
+      const keys = Object.keys(KEYS);
+      const results = await Promise.all(keys.map(k => load(KEYS[k], k === "settings" ? {} : [])));
+      const d = {};
+      keys.forEach((k, i) => { d[k] = results[i]; });
+      setData(d);
+      setReady(true);
+    })();
+  }, []);
+
+  const up = useCallback((key, fn) => {
+    setData(prev => { const next = fn(prev[key]); save(KEYS[key], next); return { ...prev, [key]: next }; });
+  }, []);
+
+  const mkTouches = useCallback((lid, grade, start) => {
+    const max = grade === "B" ? 2 : grade === "C" ? 0 : 6;
+    const ts = TOUCHES_TPL.slice(0, max).map(t => ({
+      id: uid(), lead_id: lid, num: t.n, type: t.type, label: t.label, desc: t.desc,
+      date: addDays(start || today(), t.day), done: null, status: "scheduled", outcome: null, note: "",
+    }));
+    up("touches", p => [...p, ...ts]);
+  }, [up]);
+
+  const doTouch = useCallback((tid, outcome, note) => {
+    let ref = data.touches.find(t => t.id === tid);
+    up("touches", p => p.map(t => t.id === tid ? { ...t, status: "done", done: today(), outcome, note } : t));
+    if (ref) {
+      up("activities", p => [...p, { id: uid(), lead_id: ref.lead_id, type: "touch", content: `${ref.label}: ${note}`, outcome, at: new Date().toISOString() }]);
+      if (outcome === "interested") {
+        up("touches", p => p.map(t => t.lead_id === ref.lead_id && t.status === "scheduled" && t.id !== tid ? { ...t, status: "cancelled" } : t));
+        up("leads", p => p.map(l => l.id === ref.lead_id ? { ...l, status: "negotiation" } : l));
+      }
+      if (ref.num === 6 && outcome === "no_answer") {
+        up("leads", p => p.map(l => l.id === ref.lead_id ? { ...l, status: "frozen", frozen_reason: "6 касаний без ответа" } : l));
+      }
+    }
+  }, [data.touches, up]);
+
+  // Navigate to KP tab with pre-filled data from calculator
+  const goToKP = (calcResult) => {
+    setKpFromCalc(calcResult);
+    setTab("proposals");
+  };
+
+  if (!ready) return <div style={{ padding: 60, textAlign: "center", color: "var(--color-text-tertiary)", fontFamily: "system-ui" }}>Загрузка...</div>;
+
+  const importRates = (rd) => {
+    setData(prev => ({ ...prev, freight: rd.freight, boxes: rd.boxes, drops: rd.drops, railway: rd.railway, autoMsk: rd.autoMsk }));
+    save(KEYS.freight, rd.freight); save(KEYS.boxes, rd.boxes); save(KEYS.drops, rd.drops); save(KEYS.railway, rd.railway); save(KEYS.autoMsk, rd.autoMsk);
+  };
+
+  const ctx = { ...data, up, mkTouches, doTouch, sel, setSel, setTab, importRates, onLogout, goToKP, kpFromCalc, setKpFromCalc };
+  const taskCnt = data.touches.filter(t => t.status === "scheduled" && t.date <= today()).length;
+  const tabs = [["dashboard", "Мой день", taskCnt], ["leads", "Лиды", data.leads.length], ["rates", "Ставки", data.freight.length], ["calculator", "Калькулятор", 0], ["proposals", "КП", data.proposals.length], ["patterns", "Паттерны", 0], ["settings", "Настройки", 0]];
+
+  return (
+    <div style={{ fontFamily: "'Inter', system-ui, -apple-system, sans-serif", fontSize: 13, color: "var(--color-text-primary)", minHeight: "100vh", background: "var(--color-background-tertiary)", padding: "0" }}>
+      <div style={{ background: "var(--color-background-primary)", borderBottom: "0.5px solid var(--color-border-tertiary)", padding: "10px 16px 10px", marginBottom: 16, borderRadius: "0 0 16px 16px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: "-0.3px" }}>BML</div>
+          <div style={{ fontSize: 11, color: "var(--color-text-tertiary)", fontWeight: 400 }}>Sales Panel</div>
+        </div>
+        <div style={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
+          {tabs.map(([id, label, count]) => (
+            <button key={id} onClick={() => { setTab(id); setSel(null); }} style={{
+              display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", borderRadius: 8,
+              border: "none", cursor: "pointer", fontSize: 12, fontFamily: "inherit",
+              background: tab === id ? "var(--color-background-tertiary)" : "transparent",
+              color: tab === id ? "var(--color-text-primary)" : "var(--color-text-secondary)",
+              fontWeight: tab === id ? 600 : 400, transition: "all 0.12s",
+            }}>
+              {label}
+              {count > 0 && <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 10, fontWeight: 600, background: id === "dashboard" ? "#E24B4A" : "var(--color-border-tertiary)", color: id === "dashboard" ? "#fff" : "var(--color-text-secondary)" }}>{count}</span>}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div style={{ padding: "0 12px 20px" }}>
+        {tab === "dashboard" && <Dashboard {...ctx} />}
+        {tab === "leads" && (sel ? <LeadDetail {...ctx} /> : <LeadsList {...ctx} />)}
+        {tab === "rates" && <RatesTab {...ctx} />}
+        {tab === "calculator" && <CalcTab {...ctx} />}
+        {tab === "proposals" && <ProposalsTab {...ctx} />}
+        {tab === "patterns" && <PatternsTab {...ctx} />}
+        {tab === "settings" && <SettingsTab {...ctx} />}
+      </div>
+    </div>
+  );
+}
+
+// ─── DASHBOARD ───
+function Dashboard({ leads, touches, activities, proposals, doTouch, setSel, setTab }) {
+  const [at, setAt] = useState(null);
+  const [oc, setOc] = useState("no_answer");
+  const [nt, setNt] = useState("");
+  const d = today();
+  const w = weekAgo();
+
+  const tasks = useMemo(() => touches.filter(t => t.status === "scheduled" && t.date <= d).sort((a, b) => (a.date < d ? -1 : 0) - (b.date < d ? -1 : 0) || b.num - a.num), [touches, d]);
+
+  const weeklyActive = useMemo(() => {
+    const activeLids = new Set();
+    activities.filter(a => a.at >= w).forEach(a => activeLids.add(a.lead_id));
+    touches.filter(t => t.done && t.done >= w).forEach(t => activeLids.add(t.lead_id));
+    return activeLids.size;
+  }, [activities, touches, w]);
+
+  const stats = useMemo(() => ({
+    active: leads.filter(l => !["won","lost","frozen"].includes(l.status)).length,
+    won: leads.filter(l => l.status === "won").length,
+    vol: leads.filter(l => l.status === "won").reduce((s, l) => s + (l.volume_monthly || 0), 0),
+    kp: proposals.filter(p => p.status === "sent").length,
+    weekly: weeklyActive,
+  }), [leads, proposals, weeklyActive]);
+
+  const frozen = leads.filter(l => l.status === "frozen").slice(0, 5);
+
+  return (
+    <div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8, marginBottom: 16 }}>
+        {[
+          ["Активных", stats.active, null],
+          ["За неделю", stats.weekly, "#185FA5"],
+          ["Выиграно", stats.won, "#3B6D11"],
+          ["Конт/мес", stats.vol, "#0F6E56"],
+          ["КП на руках", stats.kp, "#534AB7"],
+        ].map(([l, v, c], i) => (
+          <div key={i} style={C.metric}>
+            <div style={{ fontSize: 10, color: "var(--color-text-tertiary)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 500 }}>{l}</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: c || "var(--color-text-primary)", letterSpacing: "-0.5px" }}>{v}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={C.section}>Задачи на сегодня <span style={{ fontWeight: 400, color: "var(--color-text-tertiary)" }}>({tasks.length})</span></div>
+      {tasks.length === 0 && <div style={{ ...C.card, ...C.empty }}>Нет задач. Добавь лидов!</div>}
+      {tasks.map(t => {
+        const lead = leads.find(l => l.id === t.lead_id);
+        const over = t.date < d;
+        return (
+          <div key={t.id} style={{ ...C.card, display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", borderLeft: `3px solid ${t.type === "call" ? "#0F6E56" : t.type === "email" ? "#185FA5" : "#534AB7"}`, background: over ? "var(--color-background-danger)" : "var(--color-background-primary)" }}>
+            <Badge color={t.type === "call" ? "#0F6E56" : t.type === "email" ? "#185FA5" : "#534AB7"} bg={t.type === "call" ? "#E1F5EE" : t.type === "email" ? "#E6F1FB" : "#EEEDFE"} style={{ fontSize: 12, fontWeight: 700, padding: "3px 9px" }}>{t.num}</Badge>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", gap: 5, alignItems: "center", flexWrap: "wrap" }}>
+                <span style={{ fontWeight: 600, cursor: "pointer" }} onClick={() => { setSel(lead?.id); setTab("leads"); }}>{lead?.company_name || "?"}</span>
+                {lead?.grade && <Badge color={GRADE[lead.grade]?.c} bg={GRADE[lead.grade]?.bg}>{lead.grade}</Badge>}
+                {over && <Badge color="#A32D2D" bg="#FCEBEB">просроч.</Badge>}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--color-text-secondary)", marginTop: 2 }}>{t.label} — {t.desc}</div>
+              {lead?.phones_contact?.length > 0 && <div style={{ fontSize: 11, color: "var(--color-text-info)", marginTop: 2 }}>{lead.phones_contact[0]}</div>}
+            </div>
+            {at === t.id ? (
+              <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
+                <select style={{ ...C.sel, fontSize: 11, padding: "4px 6px" }} value={oc} onChange={e => setOc(e.target.value)}>
+                  <option value="no_answer">Нет ответа</option><option value="interested">Заинтересован</option><option value="callback">Перезвонить</option><option value="rejected">Отказ</option>
+                </select>
+                <input style={{ ...C.inp, width: 110, fontSize: 11, padding: "4px 7px" }} placeholder="Заметка" value={nt} onChange={e => setNt(e.target.value)} />
+                <button style={C.btn(true)} onClick={() => { doTouch(t.id, oc, nt); setAt(null); setNt(""); setOc("no_answer"); }}>OK</button>
+                <button style={C.btn()} onClick={() => setAt(null)}>×</button>
+              </div>
+            ) : <button style={C.btn()} onClick={() => setAt(t.id)}>Выполнить</button>}
+          </div>
+        );
+      })}
+
+      {frozen.length > 0 && (
+        <div style={{ marginTop: 18 }}>
+          <div style={C.section}>Реактивация</div>
+          {frozen.map(l => (
+            <div key={l.id} style={{ ...C.card, display: "flex", alignItems: "center", gap: 8, padding: "9px 14px" }}>
+              <Badge color="#888780" bg="#F1EFE8">замор.</Badge>
+              <span style={{ fontWeight: 500, cursor: "pointer" }} onClick={() => { setSel(l.id); setTab("leads"); }}>{l.company_name}</span>
+              <span style={{ flex: 1, fontSize: 11, color: "var(--color-text-secondary)" }}>{l.frozen_reason || ""}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── LEADS LIST ───
+function LeadsList({ leads, touches, up, mkTouches, setSel }) {
+  const [showAdd, setShowAdd] = useState(false);
+  const [showImp, setShowImp] = useState(false);
+  const [filter, setFilter] = useState("active");
+  const [sortBy, setSortBy] = useState("touch_date");
+  const [impPreview, setImpPreview] = useState(null);
+  const [impStats, setImpStats] = useState(null);
+  const fileRef = useRef();
+  const [form, setForm] = useState({ company_name: "", volume_monthly: "", routes_match: "unknown", payment_terms: "unknown", contact_name: "", source: "cold" });
+
+  // Build a map of next scheduled touch per lead
+  const touchMap = useMemo(() => {
+    const m = {};
+    touches.forEach(t => {
+      if (t.status !== "scheduled") return;
+      if (!m[t.lead_id] || t.date < m[t.lead_id].date) m[t.lead_id] = t;
+    });
+    return m;
+  }, [touches]);
+
+  // Build a map of last completed touch per lead
+  const lastTouchMap = useMemo(() => {
+    const m = {};
+    touches.forEach(t => {
+      if (t.status !== "done") return;
+      if (!m[t.lead_id] || t.num > m[t.lead_id].num) m[t.lead_id] = t;
+    });
+    return m;
+  }, [touches]);
+
+  const filtered = useMemo(() => {
+    let list;
+    if (filter === "active") list = leads.filter(l => !["won","lost","frozen"].includes(l.status));
+    else if (filter === "won") list = leads.filter(l => l.status === "won");
+    else if (filter === "frozen") list = leads.filter(l => l.status === "frozen");
+    else if ("ABC".includes(filter)) list = leads.filter(l => l.grade === filter);
+    else list = [...leads];
+
+    // Sort
+    list = [...list].sort((a, b) => {
+      if (sortBy === "touch_date") {
+        const ta = touchMap[a.id]?.date || "9999"; const tb = touchMap[b.id]?.date || "9999";
+        return ta.localeCompare(tb);
+      }
+      if (sortBy === "touch_num") {
+        const na = touchMap[a.id]?.num || 99; const nb = touchMap[b.id]?.num || 99;
+        return na - nb;
+      }
+      if (sortBy === "company") return (a.company_name || "").localeCompare(b.company_name || "");
+      if (sortBy === "grade") return (a.grade || "Z").localeCompare(b.grade || "Z");
+      if (sortBy === "volume") return (b.volume_monthly || 0) - (a.volume_monthly || 0);
+      return 0;
+    });
+    return list;
+  }, [leads, filter, sortBy, touchMap]);
+
+  const addLead = () => {
+    const grade = calcGrade({ volume_monthly: Number(form.volume_monthly), routes_match: form.routes_match, payment_terms: form.payment_terms });
+    const id = uid();
+    up("leads", p => [...p, { id, ...form, volume_monthly: Number(form.volume_monthly) || 0, grade, status: "new", created: today(), phones_raw: [], emails_raw: [], phones_contact: [], emails_kp: [], routes: [] }]);
+    if (grade !== "C") mkTouches(id, grade, today());
+    setForm({ company_name: "", volume_monthly: "", routes_match: "unknown", payment_terms: "unknown", contact_name: "", source: "cold" });
+    setShowAdd(false);
+  };
+
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0]; if (!file) return;
+    try {
+      let rows = [];
+      const buf = await file.arrayBuffer();
+      try { const wb = XLSX.read(buf, { type: "array" }); rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" }); } catch {
+        const text = new TextDecoder("utf-8").decode(buf);
+        const doc = new DOMParser().parseFromString(text, "text/html");
+        const table = doc.querySelector("table");
+        if (!table) throw new Error("Нет таблицы");
+        const hs = [...table.querySelectorAll("tr:first-child th, tr:first-child td")].map(c => c.textContent.trim());
+        rows = [...table.querySelectorAll("tr")].slice(1).map(tr => { const cs = [...tr.querySelectorAll("td")]; const o = {}; hs.forEach((h, i) => { o[h] = cs[i]?.textContent?.trim() || ""; }); return o; }).filter(r => Object.values(r).some(v => v));
+      }
+      if (!rows.length) { alert("Пустой файл"); return; }
+      const parsed = parseBitrixLeads(rows);
+      const existNames = new Set(leads.map(l => (l.company_name || "").toLowerCase()));
+      const existFull = new Set(leads.map(l => (l.company_name_full || l.company_name || "").toLowerCase()));
+      const newOnes = [], skipped = [], seen = new Set();
+      parsed.forEach(p => {
+        const k1 = p.company_name.toLowerCase(), k2 = (p.company_name_full || "").toLowerCase();
+        if (existNames.has(k1) || existFull.has(k2) || existNames.has(k2) || existFull.has(k1) || seen.has(k1)) { skipped.push(p.company_name_full || p.company_name); }
+        else { newOnes.push(p); seen.add(k1); }
+      });
+      setImpPreview(newOnes);
+      setImpStats({ total: parsed.length, newC: newOnes.length, skipC: skipped.length, skipN: skipped });
+    } catch (err) { alert("Ошибка: " + err.message); }
+    if (fileRef.current) fileRef.current.value = "";
+  };
+
+  const confirmImport = () => {
+    const newL = impPreview.map(p => { const g = calcGrade(p); return { id: uid(), ...p, grade: g, status: "new", created: today() }; });
+    up("leads", p => [...p, ...newL]);
+    newL.forEach(l => { if (l.grade !== "C") mkTouches(l.id, l.grade, today()); });
+    setImpPreview(null); setImpStats(null); setShowImp(false);
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 6 }}>
+        <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
+          {[["active","Активные"],["A","A"],["B","B"],["won","Выиграно"],["frozen","Заморож."],["all","Все"]].map(([id, l]) => (
+            <button key={id} style={{ ...C.btn(filter === id), fontSize: 11, padding: "4px 10px" }} onClick={() => setFilter(id)}>{l}</button>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button style={C.btn()} onClick={() => { setShowImp(!showImp); setShowAdd(false); }}>Импорт Excel</button>
+          <button style={C.btn(true)} onClick={() => { setShowAdd(!showAdd); setShowImp(false); }}>+ Новый</button>
+        </div>
+      </div>
+
+      {showImp && (
+        <div style={{ ...C.card, borderColor: "var(--color-border-info)" }}>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>Импорт из Битрикс24 / Excel</div>
+          <p style={{ fontSize: 12, color: "var(--color-text-secondary)", margin: "0 0 10px" }}>Загрузи .xls/.xlsx. Дубли пропустятся автоматически.</p>
+          <input type="file" ref={fileRef} accept=".xlsx,.xls,.csv" style={{ display: "none" }} onChange={handleFile} />
+          <button style={C.btn()} onClick={() => fileRef.current?.click()}>Выбрать файл</button>
+          {impStats && (
+            <div style={{ marginTop: 12, padding: 12, background: "var(--color-background-secondary)", borderRadius: 10 }}>
+              <div style={{ fontSize: 12, marginBottom: 8 }}>Найдено: <strong>{impStats.total}</strong> | Новых: <strong style={{ color: "#3B6D11" }}>{impStats.newC}</strong> | Дубли: <strong style={{ color: "#854F0B" }}>{impStats.skipC}</strong></div>
+              {impStats.skipN.length > 0 && <details style={{ fontSize: 11, color: "var(--color-text-secondary)", marginBottom: 6 }}><summary style={{ cursor: "pointer" }}>Пропущено ({impStats.skipC})</summary><div style={{ marginTop: 4 }}>{impStats.skipN.join(", ")}</div></details>}
+              {impPreview?.length > 0 && (
+                <div style={{ maxHeight: 200, overflow: "auto", marginTop: 6 }}>
+                  <table style={C.tbl}><thead><tr><th style={C.th}>Компания</th><th style={C.th}>ИНН</th><th style={C.th}>Конт</th><th style={C.th}>Направления</th><th style={C.th}>Грейд</th></tr></thead>
+                  <tbody>{impPreview.map((p, i) => { const g = calcGrade(p); return (
+                    <tr key={i}><td style={{ ...C.td, fontWeight: 500, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.company_name}</td><td style={{ ...C.td, fontSize: 11 }}>{p.inn || "—"}</td><td style={C.td}>{p.volume_monthly || "—"}</td><td style={{ ...C.td, fontSize: 10 }}>{p.routes?.slice(0, 2).map(r => `${r.port}→${r.city}`).join(", ") || "—"}</td><td style={C.td}><Badge color={GRADE[g]?.c} bg={GRADE[g]?.bg}>{g}</Badge></td></tr>
+                  ); })}</tbody></table>
+                </div>
+              )}
+              <div style={{ display: "flex", gap: 6, marginTop: 10, justifyContent: "flex-end" }}>
+                <button style={C.btn()} onClick={() => { setImpPreview(null); setImpStats(null); }}>Отмена</button>
+                {impPreview?.length > 0 && <button style={C.btn(true)} onClick={confirmImport}>Импорт {impPreview.length}</button>}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {showAdd && (
+        <div style={C.card}>
+          <div style={C.g3}>
+            <div><div style={C.lbl}>Компания *</div><input style={C.inp} value={form.company_name} onChange={e => setForm(p => ({ ...p, company_name: e.target.value }))} /></div>
+            <div><div style={C.lbl}>Конт/мес</div><input style={C.inp} type="number" value={form.volume_monthly} onChange={e => setForm(p => ({ ...p, volume_monthly: e.target.value }))} /></div>
+            <div><div style={C.lbl}>Наши направления</div><select style={{ ...C.sel, width: "100%" }} value={form.routes_match} onChange={e => setForm(p => ({ ...p, routes_match: e.target.value }))}><option value="unknown">Не знаю</option><option value="yes">Да</option><option value="partial">Частично</option><option value="no">Нет</option></select></div>
+          </div>
+          <div style={{ display: "flex", gap: 6, marginTop: 10, justifyContent: "flex-end" }}>
+            <button style={C.btn()} onClick={() => setShowAdd(false)}>Отмена</button>
+            <button style={C.btn(true)} onClick={addLead} disabled={!form.company_name}>Создать</button>
+          </div>
+        </div>
+      )}
+
+      {filtered.length === 0 ? <div style={{ ...C.card, ...C.empty }}>Нет лидов</div> : (
+        <table style={C.tbl}><thead><tr>
+          <th style={{ ...C.th, cursor: "pointer" }} onClick={() => setSortBy("company")}>Компания {sortBy === "company" ? "↑" : ""}</th>
+          <th style={{ ...C.th, cursor: "pointer" }} onClick={() => setSortBy("grade")}>Грейд {sortBy === "grade" ? "↑" : ""}</th>
+          <th style={C.th}>Статус</th>
+          <th style={{ ...C.th, cursor: "pointer" }} onClick={() => setSortBy("touch_num")}>Касание {sortBy === "touch_num" ? "↑" : ""}</th>
+          <th style={{ ...C.th, cursor: "pointer" }} onClick={() => setSortBy("touch_date")}>След. дата {sortBy === "touch_date" ? "↑" : ""}</th>
+          <th style={{ ...C.th, cursor: "pointer" }} onClick={() => setSortBy("volume")}>Конт {sortBy === "volume" ? "↓" : ""}</th>
+          <th style={C.th}>Направления</th>
+        </tr></thead>
+        <tbody>{filtered.map(l => {
+          const nextTouch = touchMap[l.id];
+          const lastTouch = lastTouchMap[l.id];
+          const d = today();
+          const overdue = nextTouch && nextTouch.date < d;
+          return (
+          <tr key={l.id} style={{ cursor: "pointer" }} onClick={() => setSel(l.id)}>
+            <td style={{ ...C.td, fontWeight: 500 }}>{l.company_name}</td>
+            <td style={C.td}><Badge color={GRADE[l.grade]?.c} bg={GRADE[l.grade]?.bg}>{l.grade}</Badge></td>
+            <td style={C.td}><Badge color={STATUS[l.status]?.c} bg={STATUS[l.status]?.bg}>{STATUS[l.status]?.l}</Badge></td>
+            <td style={C.td}>{nextTouch ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <Badge color={nextTouch.type === "call" ? "#0F6E56" : nextTouch.type === "email" ? "#185FA5" : "#534AB7"} bg={nextTouch.type === "call" ? "#E1F5EE" : nextTouch.type === "email" ? "#E6F1FB" : "#EEEDFE"} style={{ fontWeight: 700, fontSize: 10 }}>{nextTouch.num}</Badge>
+                <span style={{ fontSize: 10, color: "var(--color-text-secondary)" }}>{nextTouch.label}</span>
+              </div>
+            ) : lastTouch ? (
+              <span style={{ fontSize: 10, color: "var(--color-text-tertiary)" }}>done ({lastTouch.num}/6)</span>
+            ) : <span style={{ fontSize: 10, color: "var(--color-text-tertiary)" }}>—</span>}</td>
+            <td style={C.td}>{nextTouch ? (
+              <span style={{ fontSize: 11, fontWeight: 500, color: overdue ? "#A32D2D" : "var(--color-text-primary)" }}>{fmt(nextTouch.date)} {overdue ? "!" : ""}</span>
+            ) : "—"}</td>
+            <td style={C.td}>{l.volume_monthly || "—"}</td>
+            <td style={{ ...C.td, fontSize: 10, maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.routes?.slice(0, 2).map(r => `${r.port}→${r.city}`).join(", ") || "—"}</td>
+          </tr>);
+        })}</tbody></table>
+      )}
+    </div>
+  );
+}
+
+// ─── LEAD DETAIL ───
+function LeadDetail({ leads, touches, activities, up, doTouch, mkTouches, sel, setSel }) {
+  const lead = leads.find(l => l.id === sel);
+  const lt = useMemo(() => touches.filter(t => t.lead_id === sel).sort((a, b) => a.num - b.num), [touches, sel]);
+  const la = useMemo(() => activities.filter(a => a.lead_id === sel).sort((a, b) => new Date(b.at) - new Date(a.at)), [activities, sel]);
+  const [noteText, setNoteText] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [ef, setEf] = useState({});
+  const [newPhone, setNewPhone] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [newRoute, setNewRoute] = useState({ port: "", city: "", ctype: "40HC", weight_kg: "" });
+
+  if (!lead) return <div style={C.empty}>Не найден</div>;
+
+  const addNote = () => { if (!noteText.trim()) return; up("activities", p => [...p, { id: uid(), lead_id: sel, type: "note", content: noteText, at: new Date().toISOString() }]); setNoteText(""); };
+
+  const addPhone = () => { if (!newPhone.trim()) return; up("leads", p => p.map(l => l.id === sel ? { ...l, phones_contact: [...(l.phones_contact || []), newPhone.trim()] } : l)); setNewPhone(""); };
+  const rmPhone = (i) => up("leads", p => p.map(l => l.id === sel ? { ...l, phones_contact: (l.phones_contact || []).filter((_, j) => j !== i) } : l));
+
+  const addEmail = () => { if (!newEmail.trim()) return; up("leads", p => p.map(l => l.id === sel ? { ...l, emails_kp: [...(l.emails_kp || []), newEmail.trim()] } : l)); setNewEmail(""); };
+  const rmEmail = (i) => up("leads", p => p.map(l => l.id === sel ? { ...l, emails_kp: (l.emails_kp || []).filter((_, j) => j !== i) } : l));
+
+  const addRoute = () => { if (!newRoute.port && !newRoute.city) return; up("leads", p => p.map(l => l.id === sel ? { ...l, routes: [...(l.routes || []), { ...newRoute }] } : l)); setNewRoute({ port: "", city: "", ctype: "40HC", weight_kg: "" }); };
+  const rmRoute = (i) => up("leads", p => p.map(l => l.id === sel ? { ...l, routes: (l.routes || []).filter((_, j) => j !== i) } : l));
+
+  return (
+    <div>
+      <button style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-secondary)", fontSize: 12, fontFamily: "inherit", marginBottom: 10, padding: 0 }} onClick={() => setSel(null)}>← Назад</button>
+
+      {/* Header card */}
+      <div style={C.card}>
+        <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: "-0.3px" }}>{lead.company_name}</div>
+            {lead.company_name_full && lead.company_name_full !== lead.company_name && <div style={{ fontSize: 11, color: "var(--color-text-secondary)" }}>{lead.company_name_full}</div>}
+            <div style={{ display: "flex", gap: 4, marginTop: 6, flexWrap: "wrap", alignItems: "center" }}>
+              <Badge color={GRADE[lead.grade]?.c} bg={GRADE[lead.grade]?.bg}>Грейд {lead.grade}</Badge>
+              <Badge color={STATUS[lead.status]?.c} bg={STATUS[lead.status]?.bg}>{STATUS[lead.status]?.l}</Badge>
+              {lead.volume_monthly > 0 && <span style={{ fontSize: 11, color: "var(--color-text-secondary)" }}>{lead.volume_monthly} конт/мес</span>}
+              {lead.inn && <span style={{ fontSize: 11, color: "var(--color-text-tertiary)" }}>ИНН {lead.inn}</span>}
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 4 }}>
+            <button style={C.btn()} onClick={() => { setEf({ volume_monthly: lead.volume_monthly || "", routes_match: lead.routes_match || "unknown", payment_terms: lead.payment_terms || "unknown" }); setEditing(true); }}>Ред.</button>
+            <select style={{ ...C.sel, fontSize: 11 }} value={lead.status} onChange={e => up("leads", p => p.map(l => l.id === sel ? { ...l, status: e.target.value } : l))}>
+              {Object.entries(STATUS).map(([k, v]) => <option key={k} value={k}>{v.l}</option>)}
+            </select>
+          </div>
+        </div>
+        {lead.contact_name && <div style={{ fontSize: 12, marginTop: 8 }}>ЛПР: <strong>{lead.contact_name}</strong> {lead.website && <span style={{ color: "var(--color-text-tertiary)" }}>| {lead.website}</span>}</div>}
+        {lead.comment && <div style={{ fontSize: 11, color: "var(--color-text-tertiary)", marginTop: 4, fontStyle: "italic" }}>{lead.comment}</div>}
+        {lead.objections && <Badge color="#854F0B" bg="#FAEEDA" style={{ marginTop: 6 }}>Возражение: {lead.objections}</Badge>}
+      </div>
+
+      {editing && (
+        <div style={{ ...C.card, background: "var(--color-background-secondary)", border: "none" }}>
+          <div style={C.g3}>
+            <div><div style={C.lbl}>Конт/мес</div><input style={C.inp} type="number" value={ef.volume_monthly} onChange={e => setEf(p => ({ ...p, volume_monthly: e.target.value }))} /></div>
+            <div><div style={C.lbl}>Направления</div><select style={{ ...C.sel, width: "100%" }} value={ef.routes_match} onChange={e => setEf(p => ({ ...p, routes_match: e.target.value }))}><option value="yes">Да</option><option value="partial">Частично</option><option value="no">Нет</option><option value="unknown">Не знаю</option></select></div>
+            <div><div style={C.lbl}>Оплата</div><select style={{ ...C.sel, width: "100%" }} value={ef.payment_terms} onChange={e => setEf(p => ({ ...p, payment_terms: e.target.value }))}><option value="prepay">Предоплата</option><option value="standard">Стандарт</option><option value="deferred">Отсрочка</option><option value="unknown">Не знаю</option></select></div>
+          </div>
+          <div style={{ display: "flex", gap: 6, marginTop: 8, justifyContent: "flex-end" }}>
+            <button style={C.btn()} onClick={() => setEditing(false)}>Отмена</button>
+            <button style={C.btn(true)} onClick={() => { const g = calcGrade({ volume_monthly: Number(ef.volume_monthly), routes_match: ef.routes_match, payment_terms: ef.payment_terms }); up("leads", p => p.map(l => l.id === sel ? { ...l, volume_monthly: Number(ef.volume_monthly), routes_match: ef.routes_match, payment_terms: ef.payment_terms, grade: g } : l)); setEditing(false); }}>Сохранить</button>
+          </div>
+        </div>
+      )}
+
+      {/* Phones & Emails */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 4 }}>
+        <div style={C.card}>
+          <div style={{ ...C.lbl, marginBottom: 6, fontSize: 12, fontWeight: 600, color: "var(--color-text-primary)" }}>Телефоны для связи</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 6 }}>
+            {(lead.phones_contact || []).map((ph, i) => <Chip key={i} onRemove={() => rmPhone(i)} color="var(--color-text-info)">{ph}</Chip>)}
+            {(lead.phones_contact || []).length === 0 && <span style={{ fontSize: 11, color: "var(--color-text-tertiary)" }}>Не указано</span>}
+          </div>
+          <div style={{ display: "flex", gap: 4 }}>
+            <input style={{ ...C.inp, flex: 1, fontSize: 11 }} placeholder="+7..." value={newPhone} onChange={e => setNewPhone(e.target.value)} onKeyDown={e => e.key === "Enter" && addPhone()} />
+            <button style={{ ...C.btn(true), padding: "4px 10px", fontSize: 11 }} onClick={addPhone}>+</button>
+          </div>
+          {lead.phones_raw?.length > 0 && (
+            <details style={{ marginTop: 6, fontSize: 11, color: "var(--color-text-tertiary)" }}>
+              <summary style={{ cursor: "pointer" }}>Из Битрикс ({lead.phones_raw.length})</summary>
+              <div style={{ marginTop: 4, display: "flex", flexWrap: "wrap", gap: 3 }}>
+                {lead.phones_raw.map((ph, i) => <span key={i} style={{ cursor: "pointer", color: "var(--color-text-info)", borderBottom: "1px dashed var(--color-border-secondary)" }} onClick={() => { up("leads", p => p.map(l => l.id === sel ? { ...l, phones_contact: [...new Set([...(l.phones_contact || []), ph])] } : l)); }}>{ph}</span>)}
+              </div>
+            </details>
+          )}
+        </div>
+
+        <div style={C.card}>
+          <div style={{ ...C.lbl, marginBottom: 6, fontSize: 12, fontWeight: 600, color: "var(--color-text-primary)" }}>Почта для КП</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 6 }}>
+            {(lead.emails_kp || []).map((em, i) => <Chip key={i} onRemove={() => rmEmail(i)} color="var(--color-text-info)">{em}</Chip>)}
+            {(lead.emails_kp || []).length === 0 && <span style={{ fontSize: 11, color: "var(--color-text-tertiary)" }}>Не указано</span>}
+          </div>
+          <div style={{ display: "flex", gap: 4 }}>
+            <input style={{ ...C.inp, flex: 1, fontSize: 11 }} placeholder="email@company.ru" value={newEmail} onChange={e => setNewEmail(e.target.value)} onKeyDown={e => e.key === "Enter" && addEmail()} />
+            <button style={{ ...C.btn(true), padding: "4px 10px", fontSize: 11 }} onClick={addEmail}>+</button>
+          </div>
+          {lead.emails_raw?.length > 0 && (
+            <details style={{ marginTop: 6, fontSize: 11, color: "var(--color-text-tertiary)" }}>
+              <summary style={{ cursor: "pointer" }}>Из Битрикс ({lead.emails_raw.length})</summary>
+              <div style={{ marginTop: 4, display: "flex", flexWrap: "wrap", gap: 3 }}>
+                {lead.emails_raw.map((em, i) => <span key={i} style={{ cursor: "pointer", color: "var(--color-text-info)", borderBottom: "1px dashed var(--color-border-secondary)" }} onClick={() => { up("leads", p => p.map(l => l.id === sel ? { ...l, emails_kp: [...new Set([...(l.emails_kp || []), em])] } : l)); }}>{em}</span>)}
+              </div>
+            </details>
+          )}
+        </div>
+      </div>
+
+      {/* Routes */}
+      <div style={{ ...C.card, marginTop: 0 }}>
+        <div style={{ ...C.lbl, marginBottom: 8, fontSize: 12, fontWeight: 600, color: "var(--color-text-primary)" }}>Направления</div>
+        {(lead.routes || []).length > 0 && (
+          <div style={{ marginBottom: 8 }}>
+            {lead.routes.map((r, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 0", borderBottom: i < lead.routes.length - 1 ? "0.5px solid var(--color-border-tertiary)" : "none" }}>
+                <Badge color="#185FA5" bg="#E6F1FB" style={{ fontSize: 10 }}>{r.ctype}</Badge>
+                <span style={{ fontSize: 12 }}><strong>{r.port || "—"}</strong> → <strong>{r.city || "—"}</strong></span>
+                {r.weight_kg && <span style={{ fontSize: 10, color: "var(--color-text-tertiary)" }}>{r.weight_kg} кг</span>}
+                <span style={{ marginLeft: "auto", cursor: "pointer", color: "var(--color-text-tertiary)", fontSize: 14 }} onClick={() => rmRoute(i)}>×</span>
+              </div>
+            ))}
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
+          <div style={{ flex: 1 }}><div style={C.lbl}>Порт выхода</div><input style={C.inp} placeholder="Shanghai" value={newRoute.port} onChange={e => setNewRoute(p => ({ ...p, port: e.target.value }))} /></div>
+          <div style={{ flex: 1 }}><div style={C.lbl}>Город назначения</div><input style={C.inp} placeholder="Москва" value={newRoute.city} onChange={e => setNewRoute(p => ({ ...p, city: e.target.value }))} /></div>
+          <div style={{ width: 80 }}><div style={C.lbl}>Тип</div><select style={{ ...C.sel, width: "100%" }} value={newRoute.ctype} onChange={e => setNewRoute(p => ({ ...p, ctype: e.target.value }))}><option>20'</option><option>40'</option><option>40HC</option></select></div>
+          <div style={{ width: 80 }}><div style={C.lbl}>Вес кг</div><input style={C.inp} type="number" placeholder="опц." value={newRoute.weight_kg} onChange={e => setNewRoute(p => ({ ...p, weight_kg: e.target.value }))} /></div>
+          <button style={{ ...C.btn(true), padding: "7px 12px" }} onClick={addRoute}>+</button>
+        </div>
+      </div>
+
+      {/* Touches */}
+      <div style={{ ...C.section, marginTop: 14 }}>Касания</div>
+      {lt.length === 0 ? (
+        <div style={{ ...C.card, textAlign: "center", padding: 14, color: "var(--color-text-tertiary)" }}>
+          Нет касаний. {lead.grade === "C" && "Грейд C."}{" "}
+          <button style={{ ...C.btn(), marginLeft: 6 }} onClick={() => { const g = calcGrade(lead); up("leads", p => p.map(l => l.id === sel ? { ...l, grade: g } : l)); if (g !== "C") mkTouches(sel, g, today()); }}>Запустить</button>
+        </div>
+      ) : lt.map(t => <TouchRow key={t.id} t={t} doTouch={doTouch} />)}
+
+      {/* Notes */}
+      <div style={{ ...C.section, marginTop: 14 }}>Заметки</div>
+      <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+        <input style={{ ...C.inp, flex: 1 }} placeholder="Заметка после разговора..." value={noteText} onChange={e => setNoteText(e.target.value)} onKeyDown={e => e.key === "Enter" && addNote()} />
+        <button style={C.btn(true)} onClick={addNote}>+</button>
+      </div>
+      {la.map(a => (
+        <div key={a.id} style={{ padding: "7px 0", borderBottom: "0.5px solid var(--color-border-tertiary)", fontSize: 12 }}>
+          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+            <Badge color={a.type === "touch" ? "#534AB7" : "#6B7280"} bg={a.type === "touch" ? "#EEEDFE" : "#F3F4F6"}>{a.type === "touch" ? "касание" : "заметка"}</Badge>
+            {a.outcome && <span style={{ fontSize: 11, color: "var(--color-text-secondary)" }}>{a.outcome === "interested" ? "Заинтересован" : a.outcome === "no_answer" ? "Нет ответа" : a.outcome === "rejected" ? "Отказ" : a.outcome}</span>}
+            <span style={{ fontSize: 11, color: "var(--color-text-tertiary)", marginLeft: "auto" }}>{fmtFull(a.at)}</span>
+          </div>
+          <div style={{ color: "var(--color-text-secondary)", marginTop: 2 }}>{a.content}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TouchRow({ t, doTouch }) {
+  const [open, setOpen] = useState(false);
+  const [oc, setOc] = useState("no_answer");
+  const [n, setN] = useState("");
+  const d = today();
+  const over = t.status === "scheduled" && t.date < d;
+  const done = t.status === "done";
+  const canc = t.status === "cancelled";
+  const tc = t.type === "call" ? "#0F6E56" : t.type === "email" ? "#185FA5" : "#534AB7";
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", borderRadius: 10, marginBottom: 4, background: done || canc ? "var(--color-background-secondary)" : over ? "var(--color-background-danger)" : "var(--color-background-primary)", border: done || canc ? "none" : "0.5px solid var(--color-border-tertiary)", opacity: done || canc ? 0.55 : 1, borderLeft: `3px solid ${done || canc ? "transparent" : tc}` }}>
+      <Badge color={tc} bg={t.type === "call" ? "#E1F5EE" : t.type === "email" ? "#E6F1FB" : "#EEEDFE"} style={{ fontWeight: 700 }}>{t.num}</Badge>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontWeight: 500, fontSize: 12 }}>{t.label} <span style={{ fontWeight: 400, color: "var(--color-text-secondary)" }}>— {fmt(t.date)}</span></div>
+        <div style={{ fontSize: 11, color: "var(--color-text-secondary)" }}>{t.desc}{t.note ? ` | ${t.note}` : ""}</div>
+      </div>
+      {done && <span style={{ fontSize: 11, color: "#3B6D11", fontWeight: 500 }}>done</span>}
+      {canc && <span style={{ fontSize: 11, color: "var(--color-text-tertiary)" }}>отмен.</span>}
+      {t.status === "scheduled" && !open && <button style={C.btn()} onClick={() => setOpen(true)}>Выполнить</button>}
+      {open && (
+        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+          <select style={{ ...C.sel, fontSize: 11, padding: "4px 6px" }} value={oc} onChange={e => setOc(e.target.value)}><option value="no_answer">Нет ответа</option><option value="interested">Заинтересован</option><option value="callback">Перезвонить</option><option value="rejected">Отказ</option></select>
+          <input style={{ ...C.inp, width: 100, fontSize: 11, padding: "4px 6px" }} value={n} onChange={e => setN(e.target.value)} placeholder="Заметка" />
+          <button style={C.btn(true)} onClick={() => { doTouch(t.id, oc, n); setOpen(false); }}>OK</button>
+          <button style={C.btn()} onClick={() => setOpen(false)}>×</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── RATES ───
+function RatesTab({ freight, boxes, drops, railway, autoMsk, up, importRates }) {
+  const fileRef = useRef();
+  const [importing, setImporting] = useState(false);
+  const [preview, setPreview] = useState(null);
+  const [viewTab, setViewTab] = useState("freight");
+  const [q, setQ] = useState("");
+
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0]; if (!file) return;
+    setImporting(true);
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: "array", cellDates: true });
+      if (!wb.SheetNames || wb.SheetNames.length === 0) throw new Error("No sheets");
+      const parsed = parseRateExcel(wb, XLSX);
+      if (parsed.freight.length === 0) throw new Error("Фрахт: 0 строк. Листы: " + wb.SheetNames.join(", "));
+      setPreview(parsed);
+    } catch (err) {
+      console.error("Rate import error:", err);
+      alert("Ошибка: " + (err.message || String(err)));
+    }
+    setImporting(false);
+    if (fileRef.current) fileRef.current.value = "";
+  };
+
+  const confirmImport = () => {
+    try {
+      importRates(preview);
+      setPreview(null);
+      setTimeout(() => alert(`OK! Фрахт: ${preview.freight.length}, Ящики: ${preview.boxes.length}, Дропы: ${preview.drops.length}, ЖД: ${preview.railway.length}, Авто: ${preview.autoMsk.length}`), 100);
+    } catch (err) { alert("Ошибка сохранения: " + err.message); }
+  };
+
+  const clearAllRates = () => {
+    if (!confirm("Очистить все ставки?")) return;
+    importRates({ freight: [], boxes: [], drops: [], railway: [], autoMsk: [] });
+  };
+
+  const filteredFreight = useMemo(() => {
+    if (!q) return freight;
+    const s = q.toLowerCase();
+    return freight.filter(r => `${r.pol} ${r.line} ${r.service} ${r.terminal}`.toLowerCase().includes(s));
+  }, [freight, q]);
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 6 }}>
+        <div style={C.section}>Ставки</div>
+        <div style={{ display: "flex", gap: 6 }}>
+          <input type="file" ref={fileRef} accept=".xlsx,.xls" style={{ display: "none" }} onChange={handleFile} />
+          {freight.length > 0 && <button style={{ ...C.btn(), color: "var(--color-text-danger)" }} onClick={clearAllRates}>Очистить</button>}
+          <button style={C.btn(true)} onClick={() => fileRef.current?.click()}>{importing ? "Загрузка..." : "Загрузить КП Excel"}</button>
+        </div>
+      </div>
+
+      {freight.length > 0 && (
+        <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+          {[["Фрахт", freight.length, "#0F6E56"], ["Ящики", boxes.length, "#854F0B"], ["Дропы", drops.length, "#185FA5"], ["ЖД", railway.length, "#534AB7"], ["Авто Мск", autoMsk.length, "#D85A30"]].map(([l, v, c], i) => (
+            <div key={i} style={{ ...C.metric, minWidth: 80 }}><div style={{ fontSize: 10, color: "var(--color-text-tertiary)", textTransform: "uppercase", fontWeight: 500 }}>{l}</div><div style={{ fontSize: 18, fontWeight: 700, color: c }}>{v}</div></div>
+          ))}
+        </div>
+      )}
+
+      {preview && (
+        <div style={{ ...C.card, borderColor: "var(--color-border-info)" }}>
+          <div style={{ fontWeight: 600, marginBottom: 8 }}>Распарсено:</div>
+          <div style={{ fontSize: 12, marginBottom: 8 }}>
+            Фрахт: <strong>{preview.freight.length}</strong> | Ящики: <strong>{preview.boxes.length}</strong> | Дропы: <strong>{preview.drops.length}</strong> | ЖД: <strong>{preview.railway.length}</strong> | Авто Мск: <strong>{preview.autoMsk.length}</strong>
+          </div>
+          <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+            <button style={C.btn()} onClick={() => setPreview(null)}>Отмена</button>
+            <button style={C.btn(true)} onClick={confirmImport}>Заменить все ставки</button>
+          </div>
+        </div>
+      )}
+
+      {freight.length > 0 && (
+        <div>
+          <div style={{ display: "flex", gap: 3, marginBottom: 8 }}>
+            {[["freight","Фрахт"],["boxes","Ящики"],["drops","Дропы"],["railway","ЖД"]].map(([id,l]) => (
+              <button key={id} style={{ ...C.btn(viewTab === id), fontSize: 11, padding: "4px 10px" }} onClick={() => setViewTab(id)}>{l}</button>
+            ))}
+            <input style={{ ...C.inp, width: 140, marginLeft: "auto" }} placeholder="Поиск..." value={q} onChange={e => setQ(e.target.value)} />
+          </div>
+          <div style={{ maxHeight: 400, overflow: "auto" }}>
+            {viewTab === "freight" && (
+              <table style={C.tbl}><thead><tr><th style={C.th}>POL</th><th style={C.th}>Линия</th><th style={C.th}>Сервис</th><th style={C.th}>SOC 20/40</th><th style={C.th}>COC 20/40</th><th style={C.th}>Судно</th><th style={C.th}>Терминал</th><th style={C.th}>Выход</th></tr></thead>
+              <tbody>{filteredFreight.slice(0, 100).map(r => (
+                <tr key={r.id}><td style={C.td}>{r.pol}</td><td style={C.td}>{r.line}</td><td style={{ ...C.td, fontSize: 10 }}>{r.service}</td>
+                <td style={C.td}>{r.hasSoc ? `$${r.soc20}/$${r.soc40}` : "—"}</td>
+                <td style={C.td}>{r.hasCoc ? `$${r.coc20}/$${r.coc40}` : "—"}</td>
+                <td style={C.td}><Badge color={r.transship === "DIRECT" ? "#3B6D11" : "#854F0B"} bg={r.transship === "DIRECT" ? "#EAF3DE" : "#FAEEDA"}>{r.transship || "—"}</Badge></td>
+                <td style={{ ...C.td, fontSize: 10 }}>{r.terminal}</td><td style={C.td}>{fmt(r.departure)}</td></tr>
+              ))}</tbody></table>
+            )}
+            {viewTab === "boxes" && (
+              <table style={C.tbl}><thead><tr><th style={C.th}>POL</th><th style={C.th}>Город</th><th style={C.th}>20' $</th><th style={C.th}>40' $</th><th style={C.th}>Free time</th></tr></thead>
+              <tbody>{boxes.map((r, i) => <tr key={i}><td style={C.td}>{r.pol}</td><td style={C.td}>{r.city}</td><td style={C.td}>${r.p20}</td><td style={C.td}>${r.p40}</td><td style={{ ...C.td, fontSize: 10 }}>{r.freeTime}</td></tr>)}</tbody></table>
+            )}
+            {viewTab === "drops" && (
+              <table style={C.tbl}><thead><tr><th style={C.th}>Линия</th><th style={C.th}>Город</th><th style={C.th}>20' $</th><th style={C.th}>40' $</th><th style={C.th}>Free time</th></tr></thead>
+              <tbody>{drops.filter(d => !q || `${d.line}${d.city}`.toLowerCase().includes(q.toLowerCase())).map((r, i) => <tr key={i}><td style={C.td}>{r.line}</td><td style={C.td}>{r.city}</td><td style={C.td}>{r.p20 >= 0 ? `$${r.p20}` : "запрос"}</td><td style={C.td}>{r.p40 >= 0 ? `$${r.p40}` : "запрос"}</td><td style={{ ...C.td, fontSize: 10 }}>{r.freeTime}</td></tr>)}</tbody></table>
+            )}
+            {viewTab === "railway" && (
+              <table style={C.tbl}><thead><tr><th style={C.th}>Терминал</th><th style={C.th}>Город</th><th style={C.th}>20' ₽</th><th style={C.th}>40' ₽</th><th style={C.th}>ВОХР 20/40</th><th style={C.th}>НДС</th></tr></thead>
+              <tbody>{railway.filter(r => !q || `${r.terminal}${r.city}`.toLowerCase().includes(q.toLowerCase())).slice(0, 80).map((r, i) => <tr key={i}><td style={{ ...C.td, fontSize: 10 }}>{r.terminal}</td><td style={C.td}>{r.city}</td><td style={C.td}>{r.p20base ? `${Math.round(r.p20base).toLocaleString("ru")}` : "—"}</td><td style={C.td}>{r.p40base ? `${Math.round(r.p40base).toLocaleString("ru")}` : "—"}</td><td style={{ ...C.td, fontSize: 10 }}>{r.guard20}/{r.guard40}</td><td style={C.td}>{r.nds ? `${Math.round(r.nds * 100)}%` : "0"}</td></tr>)}</tbody></table>
+            )}
+          </div>
+        </div>
+      )}
+      {freight.length === 0 && !preview && <div style={{ ...C.card, ...C.empty }}>Загрузи Excel файл с КП/ставками (формат с листами: Фрахт ДВ, Ящики, Дроп, ЖД тарифы, Мск авто)</div>}
+    </div>
+  );
+}
+
+// ─── CALCULATOR ───
+function CalcTab({ freight, boxes, drops, railway, autoMsk, customAuto, settings, up, goToKP }) {
+  const [pol, setPol] = useState("");
+  const [city, setCity] = useState("");
+  const [ctype, setCtype] = useState("40");
+  const [weight, setWeight] = useState("22");
+  const [mUsd, setMUsd] = useState(String(settings?.marginUsd || 100));
+  const [mRub, setMRub] = useState(String(settings?.marginRub || 5000));
+  const [sortMode, setSortMode] = useState("price");
+  const [ownerFilter, setOwnerFilter] = useState("all");
+  const [readyDate, setReadyDate] = useState("");
+
+  const pols = useMemo(() => [...new Set(freight.map(r => r.pol))].sort(), [freight]);
+  const cities = useMemo(() => {
+    const rwCities = [...new Set(railway.map(r => r.city))];
+    return rwCities.sort();
+  }, [railway]);
+
+  const results = useMemo(() => {
+    if (!pol || !city) return [];
+    let raw = calcChain(
+      { freight, boxes, drops, railway, autoMsk, customAuto, settings: { ...settings, marginUsd: Number(mUsd) || 0, marginRub: Number(mRub) || 0 } },
+      { pol, city, ctype, weight: Number(weight) || 22 }
+    );
+    // Filter by SOC/COC
+    if (ownerFilter === "SOC") raw = raw.filter(r => r.ownerType === "SOC" || r.ownerType === "COC (вшит)");
+    if (ownerFilter === "COC") raw = raw.filter(r => r.ownerType === "COC" || r.ownerType === "COC (вшит)");
+    // Filter by ready date — show only departures >= readyDate
+    if (readyDate) raw = raw.filter(r => !r.departure || r.departure >= readyDate);
+    // Sort
+    if (sortMode === "date") return [...raw].sort((a, b) => (a.departure || "9999").localeCompare(b.departure || "9999"));
+    return raw;
+  }, [pol, city, ctype, weight, mUsd, mRub, freight, boxes, drops, railway, autoMsk, customAuto, settings, sortMode, ownerFilter, readyDate]);
+
+  const best = results[0];
+  const usdRate = settings?.usdRate || 90;
+
+  return (
+    <div>
+      <div style={C.section}>Калькулятор полной цепочки</div>
+      {freight.length === 0 && <div style={{ ...C.card, ...C.empty }}>Сначала загрузи ставки на вкладке "Ставки"</div>}
+      {freight.length > 0 && (
+        <>
+          <div style={{ ...C.card, display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr 1fr", gap: 8 }}>
+            <div><div style={C.lbl}>POL (порт выхода)</div><select style={{ ...C.sel, width: "100%" }} value={pol} onChange={e => setPol(e.target.value)}><option value="">Выбрать</option>{pols.map(o => <option key={o}>{o}</option>)}</select></div>
+            <div><div style={C.lbl}>Город назначения</div><select style={{ ...C.sel, width: "100%" }} value={city} onChange={e => setCity(e.target.value)}><option value="">Выбрать</option>{cities.map(c => <option key={c}>{c}</option>)}</select></div>
+            <div><div style={C.lbl}>Контейнер</div><select style={{ ...C.sel, width: "100%" }} value={ctype} onChange={e => setCtype(e.target.value)}><option value="20">20'</option><option value="40">40HC</option></select></div>
+            <div><div style={C.lbl}>Вес, т</div><input style={C.inp} type="number" value={weight} onChange={e => setWeight(e.target.value)} /></div>
+            <div><div style={C.lbl}>Маржа фрахт $</div><input style={C.inp} type="number" value={mUsd} onChange={e => setMUsd(e.target.value)} /></div>
+            <div><div style={C.lbl}>Маржа ЖД ₽</div><input style={C.inp} type="number" value={mRub} onChange={e => setMRub(e.target.value)} /></div>
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11, color: "var(--color-text-secondary)" }}>Тип:</span>
+            {[["all","Все"],["SOC","SOC"],["COC","COC"]].map(([id,l]) => (
+              <button key={id} style={{ ...C.btn(ownerFilter === id), fontSize: 11, padding: "3px 10px" }} onClick={() => setOwnerFilter(id)}>{l}</button>
+            ))}
+            <span style={{ fontSize: 11, color: "var(--color-text-secondary)", marginLeft: 8 }}>Готовность с:</span>
+            <input style={{ ...C.inp, width: 140, fontSize: 11, padding: "3px 8px" }} type="date" value={readyDate} onChange={e => setReadyDate(e.target.value)} />
+            {readyDate && <button style={{ ...C.btn(), fontSize: 10, padding: "2px 8px" }} onClick={() => setReadyDate("")}>×</button>}
+          </div>
+          <div style={{ fontSize: 11, color: "var(--color-text-secondary)", marginBottom: 8 }}>Курс: <strong>{usdRate} ₽/$</strong> (настройки). Итого маржа: <strong>{best ? `${best.marginTotalRub.toLocaleString("ru")} ₽` : "—"}</strong></div>
+
+          {pol && city && results.length === 0 && <div style={{ ...C.card, ...C.empty }}>Нет вариантов. Проверь связки фрахт→ЖД для этого маршрута.</div>}
+
+          {results.length > 0 && (
+            <div>
+              <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+                <div style={{ ...C.metric, borderLeft: "3px solid #3B6D11" }}><div style={{ fontSize: 10, color: "var(--color-text-tertiary)", textTransform: "uppercase", fontWeight: 500 }}>Лучший итого</div><div style={{ fontSize: 20, fontWeight: 700, color: "#3B6D11" }}>{best.totalRub.toLocaleString("ru")} ₽</div><div style={{ fontSize: 11, color: "var(--color-text-secondary)" }}>{best.line} / {best.ownerType}</div></div>
+                <div style={C.metric}><div style={{ fontSize: 10, color: "var(--color-text-tertiary)", textTransform: "uppercase", fontWeight: 500 }}>Фрахт лучший</div><div style={{ fontSize: 18, fontWeight: 700 }}>{best.isRubFreight ? `${best.freightRub.toLocaleString("ru")} ₽` : `$${best.freightWithMargin}`}</div><div style={{ fontSize: 11, color: "var(--color-text-secondary)" }}>{best.isRubFreight ? "в ₽, дроп вкл." : `= $${best.totalFreightUsd} + $${Number(mUsd)} маржа`}</div></div>
+                <div style={C.metric}><div style={{ fontSize: 10, color: "var(--color-text-tertiary)", textTransform: "uppercase", fontWeight: 500 }}>Вариантов</div><div style={{ fontSize: 18, fontWeight: 700 }}>{results.length}</div></div>
+              </div>
+
+              <div style={{ display: "flex", gap: 4, marginBottom: 8, alignItems: "center" }}>
+                <span style={{ fontSize: 11, color: "var(--color-text-secondary)", marginRight: 4 }}>Сортировка:</span>
+                <button style={{ ...C.btn(sortMode === "price"), fontSize: 11, padding: "3px 10px" }} onClick={() => setSortMode("price")}>По цене ₽</button>
+                <button style={{ ...C.btn(sortMode === "date"), fontSize: 11, padding: "3px 10px" }} onClick={() => setSortMode("date")}>По дате выхода</button>
+              </div>
+
+              <div style={{ maxHeight: 500, overflow: "auto" }}>
+                {results.map((r, i) => (
+                  <div key={r.id} style={{ ...C.card, padding: "12px 14px", borderLeft: i === 0 && sortMode === "price" ? "3px solid #3B6D11" : "3px solid transparent" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: "var(--color-text-tertiary)" }}>#{i + 1}</span>
+                        <strong>{r.line}</strong>
+                        <Badge color={r.transship === "DIRECT" ? "#3B6D11" : "#854F0B"} bg={r.transship === "DIRECT" ? "#EAF3DE" : "#FAEEDA"}>{r.transship}</Badge>
+                        <Badge color="#185FA5" bg="#E6F1FB">{r.ownerType}</Badge>
+                        <span style={{ fontSize: 10, color: "var(--color-text-secondary)" }}>{r.service}</span>
+                      </div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: i === 0 && sortMode === "price" ? "#3B6D11" : "var(--color-text-primary)" }}>{r.totalRub.toLocaleString("ru")} ₽</div>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 6, fontSize: 11 }}>
+                      <div style={{ padding: "6px 8px", background: "var(--color-background-secondary)", borderRadius: 6 }}>
+                        <div style={{ color: "var(--color-text-tertiary)", fontSize: 10 }}>Фрахт + {r.boxDropLabel}</div>
+                        <div style={{ fontWeight: 600 }}>{r.isRubFreight ? `${r.freightRub.toLocaleString("ru")} ₽` : `$${r.freightWithMargin}`} <span style={{ fontWeight: 400, color: "var(--color-text-secondary)" }}>{r.isRubFreight ? `(${r.freightRubRaw?.toLocaleString("ru")} + маржа)` : `(${r.freightRub.toLocaleString("ru")} ₽)`}</span></div>
+                        <div style={{ color: "var(--color-text-tertiary)", fontSize: 10 }}>{r.isRubFreight ? "Фрахт в ₽, дроп вкл. в ЖД" : `$${r.freightUsd} фрахт ${r.boxDropUsd >= 0 ? "+" : ""}${r.boxDropUsd} ${r.ownerType === "SOC" ? "ящик" : "дроп"} + $${Number(mUsd)} маржа`}</div>
+                        {r.validity && <div style={{ color: "var(--color-text-tertiary)", fontSize: 9, marginTop: 2 }}>Валидн.: {r.validity}</div>}
+                      </div>
+                      <div style={{ padding: "6px 8px", background: "var(--color-background-secondary)", borderRadius: 6 }}>
+                        <div style={{ color: "var(--color-text-tertiary)", fontSize: 10 }}>ЖД ({r.rwTerminal})</div>
+                        <div style={{ fontWeight: 600 }}>{r.rwWithMargin.toLocaleString("ru")} ₽</div>
+                        <div style={{ color: "var(--color-text-tertiary)", fontSize: 10 }}>{r.rwBase.toLocaleString("ru")} + {Number(mRub).toLocaleString("ru")} маржа</div>
+                        {r.rwValidity && <div style={{ color: "var(--color-text-tertiary)", fontSize: 9, marginTop: 2 }}>Валидн.: {r.rwValidity}</div>}
+                      </div>
+                      <div style={{ padding: "6px 8px", background: "var(--color-background-secondary)", borderRadius: 6 }}>
+                        <div style={{ color: "var(--color-text-tertiary)", fontSize: 10 }}>Охрана (справ.)</div>
+                        <div style={{ fontWeight: 600 }}>{r.rwGuard.toLocaleString("ru")} ₽</div>
+                      </div>
+                      <div style={{ padding: "6px 8px", background: "var(--color-background-secondary)", borderRadius: 6 }}>
+                        <div style={{ color: "var(--color-text-tertiary)", fontSize: 10 }}>{r.autoLabel || "Авто"}</div>
+                        <div style={{ fontWeight: 600 }}>{r.autoRub > 0 ? `${r.autoRub.toLocaleString("ru")} ₽` : "—"}</div>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 10, color: "var(--color-text-secondary)", marginTop: 4 }}>
+                      Выход: {r.departure ? fmt(r.departure) : "под запрос"} | Терминал: {r.terminal} {r.comment ? `| ${r.comment}` : ""}
+                      {r.dropValidity ? ` | Дроп: ${r.dropValidity}` : ""}
+                    </div>
+                    {r.dateWarnings && r.dateWarnings.length > 0 && (
+                      <div style={{ display: "flex", gap: 4, marginTop: 3, flexWrap: "wrap" }}>
+                        {r.dateWarnings.map((w, wi) => <Badge key={wi} color="#A32D2D" bg="#FCEBEB" style={{ fontSize: 9 }}>⚠ {w}</Badge>)}
+                      </div>
+                    )}
+                    <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 6 }}>
+                      <button style={{ ...C.btn(), fontSize: 10, padding: "3px 10px" }} onClick={() => goToKP && goToKP({
+                        ctype: ctype === "20" ? "20DC" : "40HC",
+                        pol: r.pol,
+                        freightBase: r.isRubFreight ? 0 : r.totalFreightUsd,
+                        freightMargin: Number(mUsd) || 0,
+                        railwayDest: city,
+                        railwayBase: r.rwBase,
+                        railwayMargin: Number(mRub) || 0,
+                        guard: r.rwGuard,
+                        autoCity: r.autoLabel ? city : "",
+                        autoPrice: r.autoRub,
+                        departure: r.departure || "",
+                        line: r.line,
+                        ownerType: r.ownerType,
+                        service: r.service,
+                      })}>→ Создать КП</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── PROPOSALS (КП) ───
+const EMPTY_VARIANT = () => ({
+  id: uid(),
+  ctype: "20DC",
+  incoterms: "FOB",
+  port: "",
+  freight_base: "",
+  freight_margin: "100",
+  railway_dest: "",
+  railway_base: "",
+  railway_margin: "10000",
+  security: "5932",
+  security_on: false,
+  truck_on: false,
+  truck_city: "",
+  truck_km_mkad: "",
+  truck_price: "",
+  weight_kg: "",
+  departure_date: "",
+});
+
+function formatKPVariant(v, idx) {
+  const lines = [];
+  const freightTotal = Number(v.freight_base || 0) + Number(v.freight_margin || 0);
+  const railTotal = Number(v.railway_base || 0) + Number(v.railway_margin || 0);
+  let n = 1;
+  lines.push(`${n}) Фрахт ${v.ctype} ${v.incoterms} ${v.port}: $${freightTotal}`);
+  n++;
+  if (v.railway_dest) {
+    lines.push(`${n}) Ж.д., перевозка ВМТП - ${v.railway_dest}: ${railTotal.toLocaleString("ru-RU")} ₽`);
+    n++;
+  }
+  if (v.security_on) {
+    lines.push(`${n}) Охрана РЖД (при необходимости): ${Number(v.security || 0).toLocaleString("ru-RU")} ₽`);
+    n++;
+  }
+  if (v.truck_on && v.truck_city) {
+    const kmNote = v.truck_km_mkad ? `, пробег за МКАД ${v.truck_km_mkad} км` : "";
+    lines.push(`${n}) Автовывоз в ${v.truck_city} (в т.ч., все станционные, перевес${kmNote}): ${Number(v.truck_price || 0).toLocaleString("ru-RU")} ₽ (в т.ч., НДС 22%)`);
+    n++;
+  }
+  if (v.weight_kg) {
+    lines.push(`   Вес груза: ${Number(v.weight_kg).toLocaleString("ru-RU")} кг`);
+  }
+  if (v.departure_date) {
+    lines.push(`   Выход: ${v.departure_date}`);
+  }
+  return lines.join("\n");
+}
+
+function ProposalsTab({ proposals, leads, up, settings, kpFromCalc, setKpFromCalc }) {
+  const [show, setShow] = useState(false);
+  const [leadId, setLeadId] = useState("");
+  const [kpType, setKpType] = useState("intro");
+  const [variants, setVariants] = useState([EMPTY_VARIANT()]);
+  const [emailIntro, setEmailIntro] = useState("Добрый день!\n\nНаправляем Вам ставки по интересующим направлениям:\n");
+  const [emailOutro, setEmailOutro] = useState("\nС уважением,\nОтдел продаж BM Logistics");
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [expandedKP, setExpandedKP] = useState(null);
+  const [sending, setSending] = useState(null);
+
+  // Auto-fill from calculator
+  useEffect(() => {
+    if (kpFromCalc) {
+      const v = EMPTY_VARIANT();
+      v.ctype = kpFromCalc.ctype || "40HC";
+      v.port = kpFromCalc.pol || "";
+      v.freight_base = String(kpFromCalc.freightBase || "");
+      v.freight_margin = String(kpFromCalc.freightMargin || "100");
+      v.railway_dest = kpFromCalc.railwayDest || "";
+      v.railway_base = String(kpFromCalc.railwayBase || "");
+      v.railway_margin = String(kpFromCalc.railwayMargin || "10000");
+      v.security = String(kpFromCalc.guard || "5932");
+      v.security_on = (kpFromCalc.guard || 0) > 0;
+      v.truck_on = (kpFromCalc.autoPrice || 0) > 0;
+      v.truck_city = kpFromCalc.autoCity || "";
+      v.truck_price = String(kpFromCalc.autoPrice || "");
+      v.departure_date = kpFromCalc.departure || "";
+      setVariants([v]);
+      setKpType(kpFromCalc.departure ? "specific" : "intro");
+      setShow(true);
+      setKpFromCalc(null);
+    }
+  }, [kpFromCalc]);
+
+  const sendEmail = async (proposal) => {
+    if (!proposal.emails || proposal.emails.length === 0) { alert("У лида нет почты для КП"); return; }
+    setSending(proposal.id);
+    try {
+      const res = await apiCall("POST", "/api/send", {
+        to: proposal.emails,
+        subject: "Коммерческое предложение — BM Logistics",
+        body: proposal.text,
+      });
+      if (res.ok) {
+        up("proposals", p => p.map(x => x.id === proposal.id ? { ...x, status: "sent", sent: new Date().toISOString() } : x));
+        alert("Отправлено на " + proposal.emails.join(", "));
+      } else {
+        alert("Ошибка: " + (res.error || JSON.stringify(res)));
+      }
+    } catch (err) { alert("Ошибка сети: " + err.message); }
+    setSending(null);
+  };
+
+  const selectedLead = leads.find(l => l.id === leadId);
+  const kpEmails = selectedLead?.emails_kp || [];
+
+  const addVariant = () => setVariants(p => [...p, EMPTY_VARIANT()]);
+  const rmVariant = (id) => setVariants(p => p.filter(v => v.id !== id));
+  const updVariant = (id, field, val) => setVariants(p => p.map(v => v.id === id ? { ...v, [field]: val } : v));
+
+  const fullKPText = useMemo(() => {
+    const body = variants.map((v, i) => {
+      const header = variants.length > 1 ? `\nВариант ${i + 1}:\n` : "\n";
+      return header + formatKPVariant(v, i);
+    }).join("\n");
+    return emailIntro + body + "\n" + emailOutro;
+  }, [variants, emailIntro, emailOutro]);
+
+  const saveKP = () => {
+    const lead = leads.find(l => l.id === leadId);
+    up("proposals", p => [...p, {
+      id: uid(), lead_id: leadId, company: lead?.company_name || "",
+      type: kpType, variants: variants.map(v => ({ ...v })),
+      text: fullKPText, emails: kpEmails,
+      ver: p.filter(x => x.lead_id === leadId).length + 1,
+      status: "draft", created: new Date().toISOString(), sent: null,
+    }]);
+    setShow(false); setVariants([EMPTY_VARIANT()]); setLeadId("");
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <div style={C.section}>Коммерческие предложения ({proposals.length})</div>
+        <button style={C.btn(true)} onClick={() => setShow(!show)}>+ Новое КП</button>
+      </div>
+
+      {show && (
+        <div style={C.card}>
+          {/* Header */}
+          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 10, marginBottom: 12 }}>
+            <div>
+              <div style={C.lbl}>Клиент</div>
+              <select style={{ ...C.sel, width: "100%" }} value={leadId} onChange={e => setLeadId(e.target.value)}>
+                <option value="">Выбрать...</option>
+                {leads.filter(l => !["lost"].includes(l.status)).map(l => <option key={l.id} value={l.id}>{l.company_name}</option>)}
+              </select>
+              {kpEmails.length > 0 && <div style={{ fontSize: 11, color: "var(--color-text-info)", marginTop: 3 }}>→ {kpEmails.join(", ")}</div>}
+              {kpEmails.length === 0 && leadId && <div style={{ fontSize: 11, color: "#A32D2D", marginTop: 3 }}>Нет почты для КП! Добавь в карточке лида.</div>}
+            </div>
+            <div>
+              <div style={C.lbl}>Тип КП</div>
+              <select style={{ ...C.sel, width: "100%" }} value={kpType} onChange={e => setKpType(e.target.value)}>
+                <option value="intro">Ознакомительное</option>
+                <option value="specific">Конкретное (под выход)</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Variants */}
+          {variants.map((v, vi) => (
+            <div key={v.id} style={{ background: "var(--color-background-secondary)", borderRadius: 10, padding: 12, marginBottom: 8, position: "relative" }}>
+              {variants.length > 1 && (
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600 }}>Вариант {vi + 1}</div>
+                  <button style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-tertiary)", fontSize: 16 }} onClick={() => rmVariant(v.id)}>×</button>
+                </div>
+              )}
+
+              {/* Row 1: Freight */}
+              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--color-text-secondary)", marginBottom: 4 }}>Фрахт</div>
+              <div style={{ display: "grid", gridTemplateColumns: "80px 60px 1fr 100px 100px", gap: 6, marginBottom: 8 }}>
+                <div><div style={{ ...C.lbl, fontSize: 10 }}>Тип конт.</div><select style={{ ...C.sel, width: "100%", fontSize: 11, padding: "5px 4px" }} value={v.ctype} onChange={e => updVariant(v.id, "ctype", e.target.value)}><option>20DC</option><option>40DC</option><option>40HC</option></select></div>
+                <div><div style={{ ...C.lbl, fontSize: 10 }}>Условия</div><select style={{ ...C.sel, width: "100%", fontSize: 11, padding: "5px 4px" }} value={v.incoterms} onChange={e => updVariant(v.id, "incoterms", e.target.value)}><option>FOB</option><option>CIF</option><option>EXW</option><option>CFR</option></select></div>
+                <div><div style={{ ...C.lbl, fontSize: 10 }}>Порт выхода</div><input style={{ ...C.inp, fontSize: 11, padding: "5px 6px" }} placeholder="Wuhan" value={v.port} onChange={e => updVariant(v.id, "port", e.target.value)} /></div>
+                <div><div style={{ ...C.lbl, fontSize: 10 }}>Базовая $</div><input style={{ ...C.inp, fontSize: 11, padding: "5px 6px" }} type="number" placeholder="1800" value={v.freight_base} onChange={e => updVariant(v.id, "freight_base", e.target.value)} /></div>
+                <div><div style={{ ...C.lbl, fontSize: 10 }}>Маржа $</div><input style={{ ...C.inp, fontSize: 11, padding: "5px 6px", background: "#FAEEDA" }} type="number" value={v.freight_margin} onChange={e => updVariant(v.id, "freight_margin", e.target.value)} /></div>
+              </div>
+
+              {/* Row 2: Railway */}
+              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--color-text-secondary)", marginBottom: 4 }}>Ж.д. перевозка</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 120px 120px", gap: 6, marginBottom: 8 }}>
+                <div><div style={{ ...C.lbl, fontSize: 10 }}>Станция назначения</div><input style={{ ...C.inp, fontSize: 11, padding: "5px 6px" }} placeholder="Москва (МО)" value={v.railway_dest} onChange={e => updVariant(v.id, "railway_dest", e.target.value)} /></div>
+                <div><div style={{ ...C.lbl, fontSize: 10 }}>Базовая ₽</div><input style={{ ...C.inp, fontSize: 11, padding: "5px 6px" }} type="number" placeholder="155500" value={v.railway_base} onChange={e => updVariant(v.id, "railway_base", e.target.value)} /></div>
+                <div><div style={{ ...C.lbl, fontSize: 10 }}>Маржа ₽</div><input style={{ ...C.inp, fontSize: 11, padding: "5px 6px", background: "#FAEEDA" }} type="number" value={v.railway_margin} onChange={e => updVariant(v.id, "railway_margin", e.target.value)} /></div>
+              </div>
+
+              {/* Row 3: Optional items */}
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, cursor: "pointer" }}>
+                  <input type="checkbox" checked={v.security_on} onChange={e => updVariant(v.id, "security_on", e.target.checked)} />
+                  Охрана РЖД
+                  {v.security_on && <input style={{ ...C.inp, width: 80, fontSize: 11, padding: "3px 5px", marginLeft: 4 }} type="number" value={v.security} onChange={e => updVariant(v.id, "security", e.target.value)} />}
+                  {v.security_on && <span style={{ fontSize: 10, color: "var(--color-text-tertiary)" }}>₽</span>}
+                </label>
+
+                <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, cursor: "pointer" }}>
+                  <input type="checkbox" checked={v.truck_on} onChange={e => updVariant(v.id, "truck_on", e.target.checked)} />
+                  Автовывоз
+                </label>
+
+                <div style={{ fontSize: 11, color: "var(--color-text-tertiary)" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
+                    Вес, кг: <input style={{ ...C.inp, width: 80, fontSize: 11, padding: "3px 5px" }} type="number" placeholder="опц." value={v.weight_kg} onChange={e => updVariant(v.id, "weight_kg", e.target.value)} />
+                  </label>
+                </div>
+
+                {kpType === "specific" && (
+                  <div style={{ fontSize: 11 }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                      Выход: <input style={{ ...C.inp, width: 110, fontSize: 11, padding: "3px 5px" }} type="date" value={v.departure_date} onChange={e => updVariant(v.id, "departure_date", e.target.value)} />
+                    </label>
+                  </div>
+                )}
+              </div>
+
+              {v.truck_on && (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 100px 100px", gap: 6, marginTop: 6 }}>
+                  <div><div style={{ ...C.lbl, fontSize: 10 }}>Город доставки</div><input style={{ ...C.inp, fontSize: 11, padding: "5px 6px" }} placeholder="Вязники" value={v.truck_city} onChange={e => updVariant(v.id, "truck_city", e.target.value)} /></div>
+                  <div><div style={{ ...C.lbl, fontSize: 10 }}>Км от МКАД</div><input style={{ ...C.inp, fontSize: 11, padding: "5px 6px" }} type="number" placeholder="300" value={v.truck_km_mkad} onChange={e => updVariant(v.id, "truck_km_mkad", e.target.value)} /></div>
+                  <div><div style={{ ...C.lbl, fontSize: 10 }}>Стоимость ₽</div><input style={{ ...C.inp, fontSize: 11, padding: "5px 6px" }} type="number" placeholder="99500" value={v.truck_price} onChange={e => updVariant(v.id, "truck_price", e.target.value)} /></div>
+                </div>
+              )}
+
+              {/* Live line preview */}
+              <div style={{ marginTop: 8, padding: "6px 8px", background: "var(--color-background-primary)", borderRadius: 6, fontSize: 11, fontFamily: "monospace", whiteSpace: "pre-wrap", color: "var(--color-text-secondary)", lineHeight: 1.6 }}>
+                {formatKPVariant(v, vi)}
+              </div>
+            </div>
+          ))}
+
+          <button style={{ ...C.btn(), marginBottom: 10 }} onClick={addVariant}>+ Добавить вариант</button>
+
+          {/* Email template */}
+          <details style={{ marginBottom: 10 }}>
+            <summary style={{ fontSize: 12, cursor: "pointer", color: "var(--color-text-secondary)", fontWeight: 500 }}>Шаблон письма</summary>
+            <div style={{ marginTop: 6 }}>
+              <div style={C.lbl}>Вступление</div>
+              <textarea style={{ ...C.inp, minHeight: 50, fontSize: 11, fontFamily: "inherit" }} value={emailIntro} onChange={e => setEmailIntro(e.target.value)} />
+              <div style={{ ...C.lbl, marginTop: 6 }}>Подпись</div>
+              <textarea style={{ ...C.inp, minHeight: 40, fontSize: 11, fontFamily: "inherit" }} value={emailOutro} onChange={e => setEmailOutro(e.target.value)} />
+            </div>
+          </details>
+
+          {/* Full preview */}
+          <button style={C.btn()} onClick={() => setPreviewOpen(!previewOpen)}>{previewOpen ? "Скрыть" : "Превью письма"}</button>
+          {previewOpen && (
+            <div style={{ marginTop: 8, padding: 12, background: "var(--color-background-primary)", border: "0.5px solid var(--color-border-tertiary)", borderRadius: 8, fontSize: 12, fontFamily: "monospace", whiteSpace: "pre-wrap", lineHeight: 1.7 }}>
+              {fullKPText}
+            </div>
+          )}
+
+          {/* Actions */}
+          <div style={{ display: "flex", gap: 6, marginTop: 12, justifyContent: "flex-end", alignItems: "center" }}>
+            {leadId && <button style={{ ...C.btn(), fontSize: 11 }} onClick={() => { navigator.clipboard?.writeText(fullKPText); }}>Копировать текст</button>}
+            <button style={C.btn()} onClick={() => { setShow(false); setVariants([EMPTY_VARIANT()]); }}>Отмена</button>
+            <button style={C.btn(true)} onClick={saveKP} disabled={!leadId || !variants[0]?.freight_base}>Сохранить КП</button>
+          </div>
+        </div>
+      )}
+
+      {/* Saved proposals list */}
+      {proposals.length === 0 ? <div style={{ ...C.card, ...C.empty }}>Нет КП</div> : (
+        [...proposals].reverse().map(p => (
+          <div key={p.id} style={{ ...C.card, padding: "11px 14px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <span style={{ fontWeight: 600 }}>{p.company}</span>
+                <Badge color={p.type === "intro" ? "#185FA5" : "#D85A30"} bg={p.type === "intro" ? "#E6F1FB" : "#FAECE7"}>{p.type === "intro" ? "Ознак." : "Конкрет."}</Badge>
+                <Badge color={p.status === "sent" ? "#3B6D11" : "#6B7280"} bg={p.status === "sent" ? "#EAF3DE" : "#F3F4F6"}>
+                  {p.status === "draft" ? "Черновик" : "Отправлено"}
+                </Badge>
+                <span style={{ fontSize: 11, color: "var(--color-text-tertiary)" }}>#{p.ver} — {fmtFull(p.created)}</span>
+              </div>
+              <div style={{ display: "flex", gap: 4 }}>
+                <button style={{ ...C.btn(), fontSize: 11 }} onClick={() => setExpandedKP(expandedKP === p.id ? null : p.id)}>
+                  {expandedKP === p.id ? "Скрыть" : "Текст"}
+                </button>
+                <button style={{ ...C.btn(), fontSize: 11 }} onClick={() => { navigator.clipboard?.writeText(p.text || ""); }}>Копировать</button>
+                {p.status === "draft" && p.emails?.length > 0 && <button style={{ ...C.btn(true), fontSize: 11 }} onClick={() => sendEmail(p)} disabled={sending === p.id}>{sending === p.id ? "Отправка..." : "Отправить"}</button>}
+                {p.status === "draft" && (!p.emails || p.emails.length === 0) && <button style={{ ...C.btn(), fontSize: 11, color: "var(--color-text-tertiary)" }} disabled>Нет почты</button>}
+              </div>
+            </div>
+            {p.emails?.length > 0 && <div style={{ fontSize: 10, color: "var(--color-text-tertiary)", marginTop: 3 }}>→ {p.emails.join(", ")}</div>}
+            {p.variants && <div style={{ fontSize: 10, color: "var(--color-text-secondary)", marginTop: 3 }}>{p.variants.length} вариант(ов): {p.variants.map(v => `${v.ctype} ${v.incoterms} ${v.port}`).join(" | ")}</div>}
+            {expandedKP === p.id && (
+              <div style={{ marginTop: 8, padding: 10, background: "var(--color-background-secondary)", borderRadius: 8, fontSize: 12, fontFamily: "monospace", whiteSpace: "pre-wrap", lineHeight: 1.7 }}>
+                {p.text}
+              </div>
+            )}
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
+// ─── PATTERNS ───
+function PatternsTab({ patterns, up }) {
+  const [f, setF] = useState({ cat: "success", text: "" });
+  const cats = { success: { l: "Успех", c: "#3B6D11", bg: "#EAF3DE" }, failure: { l: "Провал", c: "#A32D2D", bg: "#FCEBEB" }, objection: { l: "Возражение", c: "#854F0B", bg: "#FAEEDA" }, market: { l: "Рынок", c: "#185FA5", bg: "#E6F1FB" } };
+  const add = () => { if (!f.text.trim()) return; up("patterns", p => [...p, { id: uid(), cat: f.cat, text: f.text, at: new Date().toISOString() }]); setF(p => ({ ...p, text: "" })); };
+  return (
+    <div>
+      <div style={C.section}>Паттерны</div>
+      <p style={{ fontSize: 12, color: "var(--color-text-secondary)", marginBottom: 12 }}>Что работает, что нет. База знаний для AI.</p>
+      <div style={{ ...C.card, display: "flex", gap: 8, alignItems: "flex-end" }}>
+        <div><div style={C.lbl}>Категория</div><select style={C.sel} value={f.cat} onChange={e => setF(p => ({ ...p, cat: e.target.value }))}>{Object.entries(cats).map(([k, v]) => <option key={k} value={k}>{v.l}</option>)}</select></div>
+        <div style={{ flex: 1 }}><div style={C.lbl}>Вывод</div><input style={C.inp} value={f.text} onChange={e => setF(p => ({ ...p, text: e.target.value }))} placeholder="Клиенты 5+ конт торгуются по срокам" onKeyDown={e => e.key === "Enter" && add()} /></div>
+        <button style={C.btn(true)} onClick={add}>+</button>
+      </div>
+      {patterns.length === 0 ? <div style={{ ...C.card, ...C.empty }}>Пусто</div> : patterns.slice().reverse().map(p => (
+        <div key={p.id} style={{ ...C.card, display: "flex", gap: 8, alignItems: "center", padding: 11 }}>
+          <Badge color={cats[p.cat]?.c} bg={cats[p.cat]?.bg}>{cats[p.cat]?.l}</Badge>
+          <div style={{ flex: 1 }}><div style={{ fontSize: 13 }}>{p.text}</div><div style={{ fontSize: 11, color: "var(--color-text-tertiary)", marginTop: 2 }}>{fmtFull(p.at)}</div></div>
+          <button style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-tertiary)", fontSize: 14 }} onClick={() => up("patterns", pp => pp.filter(x => x.id !== p.id))}>×</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+
+// ─── SETTINGS ───
+function SettingsTab({ settings, customAuto, up, onLogout }) {
+  const [usdRate, setUsdRate] = useState(String(settings?.usdRate || 90));
+  const [marginUsd, setMarginUsd] = useState(String(settings?.marginUsd || 100));
+  const [marginRub, setMarginRub] = useState(String(settings?.marginRub || 5000));
+  const [testEmail, setTestEmail] = useState("");
+  const [testResult, setTestResult] = useState("");
+  const [serverInfo, setServerInfo] = useState(null);
+  const [newAuto, setNewAuto] = useState({ city: "", p20: "", p40: "" });
+
+  useEffect(() => {
+    apiCall("GET", "/api/health").then(d => setServerInfo(d)).catch(() => {});
+  }, []);
+
+  const saveSettings = () => {
+    up("settings", () => ({ usdRate: Number(usdRate), marginUsd: Number(marginUsd), marginRub: Number(marginRub) }));
+  };
+
+  const sendTestEmail = async () => {
+    if (!testEmail) { setTestResult("Введи email"); return; }
+    setTestResult("Отправка...");
+    try {
+      const res = await apiCall("POST", "/api/send", {
+        to: testEmail,
+        subject: "Тест BML CRM",
+        body: "Тестовое письмо из BML Sales Panel. Если вы видите это — отправка работает.",
+      });
+      if (res.ok) setTestResult("Отправлено! Проверь почту " + testEmail);
+      else setTestResult("Ошибка: " + (res.error || JSON.stringify(res)));
+    } catch (err) { setTestResult("Ошибка сети: " + err.message); }
+  };
+
+  const addAuto = () => {
+    if (!newAuto.city) return;
+    up("customAuto", p => [...(p || []).filter(a => a.city.toLowerCase() !== newAuto.city.toLowerCase()), { city: newAuto.city, p20: Number(newAuto.p20) || 0, p40: Number(newAuto.p40) || 0 }]);
+    setNewAuto({ city: "", p20: "", p40: "" });
+  };
+
+  return (
+    <div>
+      <div style={C.section}>Настройки</div>
+      <div style={C.card}>
+        <div style={{ fontWeight: 600, marginBottom: 10 }}>Курс и маржа</div>
+        <div style={C.g3}>
+          <div><div style={C.lbl}>Курс USD/RUB</div><input style={C.inp} type="number" value={usdRate} onChange={e => setUsdRate(e.target.value)} /></div>
+          <div><div style={C.lbl}>Маржа фрахт ($/конт)</div><input style={C.inp} type="number" value={marginUsd} onChange={e => setMarginUsd(e.target.value)} /></div>
+          <div><div style={C.lbl}>Маржа ЖД (₽/конт)</div><input style={C.inp} type="number" value={marginRub} onChange={e => setMarginRub(e.target.value)} /></div>
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
+          <button style={C.btn(true)} onClick={saveSettings}>Сохранить</button>
+        </div>
+      </div>
+
+      <div style={{ ...C.card, marginTop: 10 }}>
+        <div style={{ fontWeight: 600, marginBottom: 10 }}>Почта (SMTP)</div>
+        <div style={{ fontSize: 12, color: "var(--color-text-secondary)", marginBottom: 8 }}>
+          SMTP настроен на сервере. {serverInfo?.smtp ? <span style={{ color: "#3B6D11" }}>✓ Подключен</span> : <span style={{ color: "#A32D2D" }}>✗ Не настроен</span>}
+        </div>
+        <div style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
+          <div style={{ flex: 1 }}><div style={C.lbl}>Тестовое письмо</div><input style={C.inp} value={testEmail} onChange={e => setTestEmail(e.target.value)} placeholder="test@email.com" onKeyDown={e => e.key === "Enter" && sendTestEmail()} /></div>
+          <button style={C.btn(true)} onClick={sendTestEmail}>Отправить тест</button>
+        </div>
+        {testResult && <div style={{ fontSize: 11, marginTop: 6, color: testResult.includes("Отправлено") ? "#3B6D11" : "#A32D2D" }}>{testResult}</div>}
+      </div>
+
+      <div style={{ ...C.card, marginTop: 10 }}>
+        <div style={{ fontWeight: 600, marginBottom: 10 }}>Сервер</div>
+        <div style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>
+          {serverInfo ? (
+            <span>БД: ✓ | SMTP: {serverInfo.smtp ? "✓" : "✗"} | Ключей: {serverInfo.keys}</span>
+          ) : "Загрузка..."}
+        </div>
+        <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+          <button style={{ ...C.btn(), color: "#A32D2D" }} onClick={() => { if (confirm("Выйти из CRM?")) { setApiKey(""); onLogout(); } }}>Выйти (сменить ключ)</button>
+        </div>
+      </div>
+
+      <div style={{ ...C.card, marginTop: 10 }}>
+        <div style={{ fontWeight: 600, marginBottom: 10 }}>Ставки авто (не Москва)</div>
+        <p style={{ fontSize: 11, color: "var(--color-text-secondary)", marginBottom: 8 }}>Для городов кроме Москвы. Авто Москвы берётся из загруженного Excel.</p>
+        {(customAuto || []).map((a, i) => (
+          <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", padding: "4px 0", borderBottom: "0.5px solid var(--color-border-tertiary)" }}>
+            <span style={{ flex: 1, fontWeight: 500 }}>{a.city}</span>
+            <span style={{ fontSize: 11 }}>20: {a.p20.toLocaleString("ru")} ₽</span>
+            <span style={{ fontSize: 11 }}>40: {a.p40.toLocaleString("ru")} ₽</span>
+            <button style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-tertiary)" }} onClick={() => up("customAuto", p => (p||[]).filter((_, j) => j !== i))}>×</button>
+          </div>
+        ))}
+        <div style={{ display: "flex", gap: 6, marginTop: 8, alignItems: "flex-end" }}>
+          <div style={{ flex: 1 }}><div style={C.lbl}>Город</div><input style={C.inp} value={newAuto.city} onChange={e => setNewAuto(p => ({ ...p, city: e.target.value }))} placeholder="Екатеринбург" /></div>
+          <div><div style={C.lbl}>20 ₽</div><input style={C.inp} type="number" value={newAuto.p20} onChange={e => setNewAuto(p => ({ ...p, p20: e.target.value }))} /></div>
+          <div><div style={C.lbl}>40 ₽</div><input style={C.inp} type="number" value={newAuto.p40} onChange={e => setNewAuto(p => ({ ...p, p40: e.target.value }))} /></div>
+          <button style={C.btn(true)} onClick={addAuto}>+</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+    // ─── ROOT WITH LOGIN ───
+    function Root() {
+      const [authed, setAuthed] = useState(!!getApiKey());
+      if (!authed) return <LoginScreen onLogin={() => setAuthed(true)} />;
+      return <App onLogout={() => { setApiKey(""); setAuthed(false); }} />;
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<Root />);
+  </script>
+</body>
+</html>
