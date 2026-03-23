@@ -121,6 +121,9 @@ function getTransporter() {
       port: SMTP_PORT,
       secure: SMTP_PORT === 465,
       auth: { user: SMTP_USER, pass: SMTP_PASS },
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 15000,
     });
   }
   return transporter;
@@ -131,7 +134,7 @@ function getTransporter() {
 app.post("/api/send", auth, async (req, res) => {
   try {
     const t = getTransporter();
-    if (!t) return res.status(500).json({ error: "SMTP not configured" });
+    if (!t) return res.status(500).json({ error: "SMTP not configured. Set SMTP_USER and SMTP_PASS env vars." });
 
     const { to, subject, body: textBody, html } = req.body;
     if (!to || !subject) return res.status(400).json({ error: "to and subject required" });
@@ -144,6 +147,7 @@ app.post("/api/send", auth, async (req, res) => {
       htmlBody = buildEmailHtml(textBody);
     }
 
+    console.log(`Sending email to: ${recipients}, subject: ${subject}`);
     const info = await t.sendMail({
       from: `"${FROM_NAME}" <${FROM_EMAIL}>`,
       to: recipients,
@@ -151,11 +155,12 @@ app.post("/api/send", auth, async (req, res) => {
       text: textBody || "",
       html: htmlBody || undefined,
     });
+    console.log(`Email sent: ${info.messageId}`);
 
     res.json({ ok: true, messageId: info.messageId });
   } catch (e) {
-    console.error("Send error:", e);
-    res.status(500).json({ error: e.message });
+    console.error("Send error:", e.message, e.code);
+    res.status(500).json({ error: `${e.code || "UNKNOWN"}: ${e.message}` });
   }
 });
 
@@ -199,10 +204,19 @@ function buildEmailHtml(text) {
 }
 
 // ─── HEALTH CHECK ───
-app.get("/api/health", (req, res) => {
+app.get("/api/health", auth, async (req, res) => {
+  let smtpOk = false;
+  let smtpError = "";
+  const t = getTransporter();
+  if (t) {
+    try { await t.verify(); smtpOk = true; }
+    catch (e) { smtpError = e.message; }
+  }
   res.json({
     ok: true,
-    smtp: !!(SMTP_USER && SMTP_PASS),
+    smtp: smtpOk,
+    smtpError: smtpError || undefined,
+    smtpUser: SMTP_USER ? SMTP_USER.replace(/(.{3}).*(@.*)/, "$1***$2") : "not set",
     db: true,
     keys: stmtList.all("bml-%").length,
   });
