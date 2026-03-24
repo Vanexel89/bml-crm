@@ -696,6 +696,12 @@ function App({ onLogout }) {
     setTab("proposals");
   };
 
+  // Navigate to KP tab from lead detail with selected routes
+  const goToKPFromLead = ({ leadId, routes }) => {
+    setKpFromCalc({ fromLead: true, leadId, routes });
+    setTab("proposals");
+  };
+
   if (!ready) return <div style={{ padding: 60, textAlign: "center", color: "var(--color-text-tertiary)", fontFamily: "system-ui" }}>Загрузка...</div>;
 
   const importRates = (rd) => {
@@ -703,7 +709,7 @@ function App({ onLogout }) {
     save(KEYS.freight, rd.freight); save(KEYS.boxes, rd.boxes); save(KEYS.drops, rd.drops); save(KEYS.railway, rd.railway); save(KEYS.autoMsk, rd.autoMsk);
   };
 
-  const ctx = { ...data, up, mkTouches, doTouch, sel, setSel, setTab, importRates, onLogout, goToKP, kpFromCalc, setKpFromCalc };
+  const ctx = { ...data, up, mkTouches, doTouch, sel, setSel, setTab, importRates, onLogout, goToKP, goToKPFromLead, kpFromCalc, setKpFromCalc };
   const taskCnt = data.touches.filter(t => t.status === "scheduled" && t.date <= today()).length;
   const tabs = [["dashboard", "Мой день", taskCnt], ["leads", "Лиды", data.leads.length], ["rates", "Ставки", data.freight.length], ["calculator", "Калькулятор", 0], ["proposals", "КП", data.proposals.length], ["patterns", "Паттерны", 0], ["settings", "Настройки", 0]];
 
@@ -743,7 +749,7 @@ function App({ onLogout }) {
 }
 
 // ─── DASHBOARD ───
-function Dashboard({ leads, touches, activities, proposals, doTouch, setSel, setTab }) {
+function Dashboard({ leads, touches, activities, proposals, doTouch, setSel, setTab, freight, boxes, drops, railway, autoMsk, customAuto, settings }) {
   const [at, setAt] = useState(null);
   const [oc, setOc] = useState("no_answer");
   const [nt, setNt] = useState("");
@@ -751,6 +757,42 @@ function Dashboard({ leads, touches, activities, proposals, doTouch, setSel, set
   const w = weekAgo();
 
   const tasks = useMemo(() => touches.filter(t => t.status === "scheduled" && t.date <= d).sort((a, b) => (a.date < d ? -1 : 0) - (b.date < d ? -1 : 0) || b.num - a.num), [touches, d]);
+
+  // Rate improvement detection: compare saved KP rate snapshots with current rates
+  const rateAlerts = useMemo(() => {
+    if (!freight || freight.length === 0) return [];
+    const alerts = [];
+    const seen = new Set();
+    proposals.forEach(p => {
+      if (!p.rateSnapshot || seen.has(p.lead_id)) return;
+      p.rateSnapshot.forEach(snap => {
+        if (!snap.port || !snap.city) return;
+        const ctype = (snap.ctype || "40HC").includes("20") ? "20" : "40";
+        const results = calcChain(
+          { freight, boxes, drops, railway, autoMsk, customAuto, settings: settings || {} },
+          { pol: snap.port, city: snap.city, ctype, weight: 22 }
+        );
+        if (results.length > 0) {
+          const bestNow = results[0];
+          const oldFreight = snap.freightBase || 0;
+          const oldRailway = snap.railwayBase || 0;
+          const newFreight = bestNow.isRubFreight ? 0 : bestNow.totalFreightUsd;
+          const newRailway = bestNow.rwBase;
+          if (newFreight < oldFreight || newRailway < oldRailway) {
+            const lead = leads.find(l => l.id === p.lead_id);
+            if (lead && !seen.has(p.lead_id)) {
+              seen.add(p.lead_id);
+              const savings = [];
+              if (newFreight < oldFreight) savings.push(`фрахт $${oldFreight}→$${newFreight}`);
+              if (newRailway < oldRailway) savings.push(`ЖД ${oldRailway.toLocaleString("ru")}→${newRailway.toLocaleString("ru")}₽`);
+              alerts.push({ leadId: p.lead_id, company: lead.company_name, route: `${snap.port}→${snap.city}`, savings: savings.join(", ") });
+            }
+          }
+        }
+      });
+    });
+    return alerts;
+  }, [proposals, freight, boxes, drops, railway, autoMsk, customAuto, settings, leads]);
 
   const weeklyActive = useMemo(() => {
     const activeLids = new Set();
@@ -785,6 +827,22 @@ function Dashboard({ leads, touches, activities, proposals, doTouch, setSel, set
           </div>
         ))}
       </div>
+
+      {rateAlerts.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={C.section}>Ставки стали дешевле <Badge color="#3B6D11" bg="#EAF3DE">{rateAlerts.length}</Badge></div>
+          {rateAlerts.map((a, i) => (
+            <div key={i} style={{ ...C.card, display: "flex", alignItems: "center", gap: 8, padding: "9px 14px", borderLeft: "3px solid #3B6D11" }}>
+              <Badge color="#3B6D11" bg="#EAF3DE">↓</Badge>
+              <div style={{ flex: 1 }}>
+                <span style={{ fontWeight: 600, cursor: "pointer" }} onClick={() => { setSel(a.leadId); setTab("leads"); }}>{a.company}</span>
+                <div style={{ fontSize: 11, color: "var(--color-text-secondary)", marginTop: 1 }}>{a.route}: {a.savings}</div>
+              </div>
+              <button style={{ ...C.btn(), fontSize: 10, padding: "3px 10px" }} onClick={() => { setSel(a.leadId); setTab("leads"); }}>Открыть</button>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div style={C.section}>Задачи на сегодня <span style={{ fontWeight: 400, color: "var(--color-text-tertiary)" }}>({tasks.length})</span></div>
       {tasks.length === 0 && <div style={{ ...C.card, ...C.empty }}>Нет задач. Добавь лидов!</div>}
@@ -1031,7 +1089,7 @@ function LeadsList({ leads, touches, up, mkTouches, setSel }) {
 }
 
 // ─── LEAD DETAIL ───
-function LeadDetail({ leads, touches, activities, up, doTouch, mkTouches, sel, setSel }) {
+function LeadDetail({ leads, touches, activities, up, doTouch, mkTouches, sel, setSel, goToKPFromLead, freight }) {
   const lead = leads.find(l => l.id === sel);
   const lt = useMemo(() => touches.filter(t => t.lead_id === sel).sort((a, b) => a.num - b.num), [touches, sel]);
   const la = useMemo(() => activities.filter(a => a.lead_id === sel).sort((a, b) => new Date(b.at) - new Date(a.at)), [activities, sel]);
@@ -1041,6 +1099,11 @@ function LeadDetail({ leads, touches, activities, up, doTouch, mkTouches, sel, s
   const [newPhone, setNewPhone] = useState("");
   const [newEmail, setNewEmail] = useState("");
   const [newRoute, setNewRoute] = useState({ port: "", city: "", ctype: "40HC", weight_kg: "" });
+  const [selectedRoutes, setSelectedRoutes] = useState(new Set());
+
+  const toggleRoute = (i) => setSelectedRoutes(prev => { const n = new Set(prev); n.has(i) ? n.delete(i) : n.add(i); return n; });
+  const selectAllRoutes = () => { if (selectedRoutes.size === (lead.routes||[]).length) setSelectedRoutes(new Set()); else setSelectedRoutes(new Set((lead.routes||[]).map((_,i) => i))); };
+  const hasRates = freight && freight.length > 0;
 
   if (!lead) return <div style={C.empty}>Не найден</div>;
 
@@ -1143,15 +1206,38 @@ function LeadDetail({ leads, touches, activities, up, doTouch, mkTouches, sel, s
 
       {/* Routes */}
       <div style={{ ...C.card, marginTop: 0 }}>
-        <div style={{ ...C.lbl, marginBottom: 8, fontSize: 12, fontWeight: 600, color: "var(--color-text-primary)" }}>Направления</div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <div style={{ ...C.lbl, marginBottom: 0, fontSize: 12, fontWeight: 600, color: "var(--color-text-primary)" }}>Направления</div>
+          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+            {(lead.routes || []).length > 0 && (
+              <>
+                <button style={{ ...C.btn(), fontSize: 10, padding: "3px 8px" }} onClick={selectAllRoutes}>
+                  {selectedRoutes.size === (lead.routes||[]).length ? "Снять все" : "Выбрать все"}
+                </button>
+                {selectedRoutes.size > 0 && hasRates && (
+                  <button style={{ ...C.btn(true), fontSize: 10, padding: "3px 10px" }} onClick={() => {
+                    const routes = [...selectedRoutes].map(i => lead.routes[i]).filter(Boolean);
+                    goToKPFromLead && goToKPFromLead({ leadId: sel, routes });
+                  }}>
+                    Создать КП ({selectedRoutes.size})
+                  </button>
+                )}
+                {selectedRoutes.size > 0 && !hasRates && (
+                  <span style={{ fontSize: 10, color: "var(--color-text-tertiary)" }}>Загрузи ставки</span>
+                )}
+              </>
+            )}
+          </div>
+        </div>
         {(lead.routes || []).length > 0 && (
           <div style={{ marginBottom: 8 }}>
             {lead.routes.map((r, i) => (
-              <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 0", borderBottom: i < lead.routes.length - 1 ? "0.5px solid var(--color-border-tertiary)" : "none" }}>
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 0", borderBottom: i < lead.routes.length - 1 ? "0.5px solid var(--color-border-tertiary)" : "none", cursor: "pointer" }} onClick={() => toggleRoute(i)}>
+                <input type="checkbox" checked={selectedRoutes.has(i)} onChange={() => toggleRoute(i)} style={{ cursor: "pointer" }} onClick={e => e.stopPropagation()} />
                 <Badge color="#185FA5" bg="#E6F1FB" style={{ fontSize: 10 }}>{r.ctype}</Badge>
                 <span style={{ fontSize: 12 }}><strong>{r.port || "—"}</strong> → <strong>{r.city || "—"}</strong></span>
                 {r.weight_kg && <span style={{ fontSize: 10, color: "var(--color-text-tertiary)" }}>{r.weight_kg} кг</span>}
-                <span style={{ marginLeft: "auto", cursor: "pointer", color: "var(--color-text-tertiary)", fontSize: 14 }} onClick={() => rmRoute(i)}>×</span>
+                <span style={{ marginLeft: "auto", cursor: "pointer", color: "var(--color-text-tertiary)", fontSize: 14 }} onClick={(e) => { e.stopPropagation(); rmRoute(i); }}>×</span>
               </div>
             ))}
           </div>
@@ -1493,6 +1579,17 @@ function CalcTab({ freight, boxes, drops, railway, autoMsk, customAuto, settings
 }
 
 // ─── PROPOSALS (КП) ───
+const EMAIL_SIGNATURE = `Best regards,
+
+Dorofeev Vitaliy
+Deputy Director
+BML Transport & Consulting
+office 4062, 17 Butlerova st., (NEO GEO)
+117342, Moscow, Russia
+Tel. +7 495 568 1989
+Mob. +7 915 314 7855
+http://www.bml-dv.com`;
+
 const EMPTY_VARIANT = () => ({
   id: uid(),
   ctype: "20DC",
@@ -1542,20 +1639,90 @@ function formatKPVariant(v, idx) {
   return lines.join("\n");
 }
 
-function ProposalsTab({ proposals, leads, up, settings, kpFromCalc, setKpFromCalc }) {
+// Build HTML email with table for 3+ variants
+function buildKPEmailHtml(contactName, variants, signature) {
+  const greeting = contactName ? `Добрый день, ${contactName}!` : "Добрый день!";
+  const useTable = variants.length >= 3;
+
+  let body = "";
+  if (useTable) {
+    // Table format
+    let rows = "";
+    variants.forEach((v, i) => {
+      const freightTotal = Number(v.freight_base || 0) + Number(v.freight_margin || 0);
+      const railTotal = Number(v.railway_base || 0) + Number(v.railway_margin || 0);
+      const autoStr = v.truck_on && v.truck_price ? `${Number(v.truck_price).toLocaleString("ru-RU")} ₽` : "—";
+      const depStr = v.departure_date || "под запрос";
+      rows += `<tr style="border-bottom:1px solid #e8e8e8;">
+        <td style="padding:8px 10px;font-size:13px;">${v.port || "—"}</td>
+        <td style="padding:8px 10px;font-size:13px;">${depStr}</td>
+        <td style="padding:8px 10px;font-size:13px;">${v.railway_dest || "—"}</td>
+        <td style="padding:8px 10px;font-size:13px;">${v.ctype}</td>
+        <td style="padding:8px 10px;font-size:13px;">$${freightTotal}</td>
+        <td style="padding:8px 10px;font-size:13px;">${railTotal.toLocaleString("ru-RU")} ₽</td>
+        <td style="padding:8px 10px;font-size:13px;">${autoStr}</td>
+      </tr>`;
+    });
+    body = `<table style="width:100%;border-collapse:collapse;margin:16px 0;" cellpadding="0" cellspacing="0">
+      <thead><tr style="background:#f5f5f4;">
+        <th style="padding:8px 10px;text-align:left;font-size:11px;color:#666;font-weight:600;text-transform:uppercase;border-bottom:2px solid #ddd;">Порт выхода</th>
+        <th style="padding:8px 10px;text-align:left;font-size:11px;color:#666;font-weight:600;text-transform:uppercase;border-bottom:2px solid #ddd;">Дата выхода</th>
+        <th style="padding:8px 10px;text-align:left;font-size:11px;color:#666;font-weight:600;text-transform:uppercase;border-bottom:2px solid #ddd;">Станция назначения</th>
+        <th style="padding:8px 10px;text-align:left;font-size:11px;color:#666;font-weight:600;text-transform:uppercase;border-bottom:2px solid #ddd;">Тип КТК</th>
+        <th style="padding:8px 10px;text-align:left;font-size:11px;color:#666;font-weight:600;text-transform:uppercase;border-bottom:2px solid #ddd;">Фрахт (USD)</th>
+        <th style="padding:8px 10px;text-align:left;font-size:11px;color:#666;font-weight:600;text-transform:uppercase;border-bottom:2px solid #ddd;">ЖД (₽)</th>
+        <th style="padding:8px 10px;text-align:left;font-size:11px;color:#666;font-weight:600;text-transform:uppercase;border-bottom:2px solid #ddd;">Авто (₽)</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  } else {
+    // Text format for 1-2 variants
+    const lines = variants.map((v, i) => {
+      const header = variants.length > 1 ? `<br><b>Вариант ${i + 1}:</b><br>` : "<br>";
+      return header + formatKPVariant(v, i).replace(/\n/g, "<br>");
+    }).join("");
+    body = lines;
+  }
+
+  const sigHtml = signature.replace(/\n/g, "<br>").replace(/(http[s]?:\/\/[^\s<]+)/g, '<a href="$1" style="color:#1a73e8;text-decoration:none;">$1</a>');
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;">
+<div style="max-width:700px;margin:20px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.1);">
+<div style="background:#1a2332;padding:20px 28px;">
+<div style="color:#fff;font-size:18px;font-weight:700;">BML Transport & Consulting</div>
+<div style="color:#8899aa;font-size:12px;margin-top:2px;">Коммерческое предложение</div>
+</div>
+<div style="padding:24px 28px;font-size:14px;line-height:1.7;color:#333;">
+${greeting}<br><br>Направляем Вам ставки по интересующим направлениям:
+${body}
+</div>
+<div style="border-top:1px solid #e8e8e8;padding:16px 28px;font-size:12px;color:#888;line-height:1.6;">${sigHtml}</div>
+</div></body></html>`;
+}
+
+// Plain text version
+function buildKPPlainText(contactName, variants, signature) {
+  const greeting = contactName ? `Добрый день, ${contactName}!` : "Добрый день!";
+  const body = variants.map((v, i) => {
+    const header = variants.length > 1 ? `\nВариант ${i + 1}:\n` : "\n";
+    return header + formatKPVariant(v, i);
+  }).join("\n");
+  return greeting + "\n\nНаправляем Вам ставки по интересующим направлениям:\n" + body + "\n\n" + signature;
+}
+
+function ProposalsTab({ proposals, leads, up, settings, kpFromCalc, setKpFromCalc, freight, boxes, drops, railway, autoMsk, customAuto }) {
   const [show, setShow] = useState(false);
   const [leadId, setLeadId] = useState("");
   const [kpType, setKpType] = useState("intro");
   const [variants, setVariants] = useState([EMPTY_VARIANT()]);
-  const [emailIntro, setEmailIntro] = useState("Добрый день!\n\nНаправляем Вам ставки по интересующим направлениям:\n");
-  const [emailOutro, setEmailOutro] = useState("\nС уважением,\nОтдел продаж BM Logistics");
   const [previewOpen, setPreviewOpen] = useState(false);
   const [expandedKP, setExpandedKP] = useState(null);
   const [sending, setSending] = useState(null);
+  const [autoCalcMode, setAutoCalcMode] = useState(false);
 
-  // Auto-fill from calculator
+  // Auto-fill from calculator (single variant)
   useEffect(() => {
-    if (kpFromCalc) {
+    if (kpFromCalc && !kpFromCalc.fromLead) {
       const v = EMPTY_VARIANT();
       v.ctype = kpFromCalc.ctype || "40HC";
       v.port = kpFromCalc.pol || "";
@@ -1573,6 +1740,60 @@ function ProposalsTab({ proposals, leads, up, settings, kpFromCalc, setKpFromCal
       setVariants([v]);
       setKpType(kpFromCalc.departure ? "specific" : "intro");
       setShow(true);
+      setAutoCalcMode(false);
+      setKpFromCalc(null);
+    }
+  }, [kpFromCalc]);
+
+  // Auto-fill from lead routes (multiple variants via calcChain)
+  useEffect(() => {
+    if (kpFromCalc && kpFromCalc.fromLead) {
+      const { leadId: lid, routes } = kpFromCalc;
+      setLeadId(lid);
+      setAutoCalcMode(true);
+      const marginUsd = settings?.marginUsd || 100;
+      const marginRub = settings?.marginRub || 5000;
+      const newVariants = [];
+      routes.forEach(route => {
+        const ctype = (route.ctype || "40HC").includes("20") ? "20" : "40";
+        const weight = route.weight_kg ? Number(route.weight_kg) / 1000 : 22;
+        const results = calcChain(
+          { freight, boxes, drops, railway, autoMsk, customAuto, settings: { ...settings, marginUsd, marginRub } },
+          { pol: route.port, city: route.city, ctype, weight }
+        );
+        if (results.length > 0) {
+          const best = results[0];
+          const v = EMPTY_VARIANT();
+          v.ctype = ctype === "20" ? "20DC" : "40HC";
+          v.port = route.port || "";
+          v.freight_base = best.isRubFreight ? "0" : String(best.totalFreightUsd || "");
+          v.freight_margin = String(marginUsd);
+          v.railway_dest = route.city || "";
+          v.railway_base = String(best.rwBase || "");
+          v.railway_margin = String(marginRub);
+          v.security = String(best.rwGuard || "5932");
+          v.security_on = (best.rwGuard || 0) > 0;
+          v.truck_on = (best.autoRub || 0) > 0;
+          v.truck_city = best.autoLabel ? route.city : "";
+          v.truck_price = String(best.autoRub || "");
+          v.departure_date = best.departure || "";
+          v.weight_kg = route.weight_kg || "";
+          v._calcResult = best; // store for reference
+          newVariants.push(v);
+        } else {
+          // No rate found — create empty variant for manual fill
+          const v = EMPTY_VARIANT();
+          v.ctype = ctype === "20" ? "20DC" : "40HC";
+          v.port = route.port || "";
+          v.railway_dest = route.city || "";
+          v.weight_kg = route.weight_kg || "";
+          v._noRate = true;
+          newVariants.push(v);
+        }
+      });
+      setVariants(newVariants.length > 0 ? newVariants : [EMPTY_VARIANT()]);
+      setKpType(newVariants.some(v => v.departure_date) ? "specific" : "intro");
+      setShow(true);
       setKpFromCalc(null);
     }
   }, [kpFromCalc]);
@@ -1583,8 +1804,9 @@ function ProposalsTab({ proposals, leads, up, settings, kpFromCalc, setKpFromCal
     try {
       const res = await apiCall("POST", "/api/send", {
         to: proposal.emails,
-        subject: "Коммерческое предложение — BM Logistics",
+        subject: "Коммерческое предложение — BML Transport & Consulting",
         body: proposal.text,
+        html: proposal.html || undefined,
       });
       if (res.ok) {
         up("proposals", p => p.map(x => x.id === proposal.id ? { ...x, status: "sent", sent: new Date().toISOString() } : x));
@@ -1598,29 +1820,34 @@ function ProposalsTab({ proposals, leads, up, settings, kpFromCalc, setKpFromCal
 
   const selectedLead = leads.find(l => l.id === leadId);
   const kpEmails = selectedLead?.emails_kp || [];
+  const contactFirstName = (selectedLead?.contact_name || "").split(" ")[0] || "";
 
   const addVariant = () => setVariants(p => [...p, EMPTY_VARIANT()]);
   const rmVariant = (id) => setVariants(p => p.filter(v => v.id !== id));
   const updVariant = (id, field, val) => setVariants(p => p.map(v => v.id === id ? { ...v, [field]: val } : v));
 
   const fullKPText = useMemo(() => {
-    const body = variants.map((v, i) => {
-      const header = variants.length > 1 ? `\nВариант ${i + 1}:\n` : "\n";
-      return header + formatKPVariant(v, i);
-    }).join("\n");
-    return emailIntro + body + "\n" + emailOutro;
-  }, [variants, emailIntro, emailOutro]);
+    return buildKPPlainText(contactFirstName, variants, EMAIL_SIGNATURE);
+  }, [variants, contactFirstName]);
+
+  const fullKPHtml = useMemo(() => {
+    return buildKPEmailHtml(contactFirstName, variants, EMAIL_SIGNATURE);
+  }, [variants, contactFirstName]);
 
   const saveKP = () => {
     const lead = leads.find(l => l.id === leadId);
     up("proposals", p => [...p, {
       id: uid(), lead_id: leadId, company: lead?.company_name || "",
-      type: kpType, variants: variants.map(v => ({ ...v })),
-      text: fullKPText, emails: kpEmails,
+      type: kpType, variants: variants.map(v => { const { _calcResult, _noRate, ...rest } = v; return rest; }),
+      text: fullKPText, html: fullKPHtml, emails: kpEmails,
       ver: p.filter(x => x.lead_id === leadId).length + 1,
       status: "draft", created: new Date().toISOString(), sent: null,
+      rateSnapshot: variants.map(v => ({
+        port: v.port, city: v.railway_dest, ctype: v.ctype,
+        freightBase: Number(v.freight_base || 0), railwayBase: Number(v.railway_base || 0),
+      })),
     }]);
-    setShow(false); setVariants([EMPTY_VARIANT()]); setLeadId("");
+    setShow(false); setVariants([EMPTY_VARIANT()]); setLeadId(""); setAutoCalcMode(false);
   };
 
   return (
@@ -1653,8 +1880,13 @@ function ProposalsTab({ proposals, leads, up, settings, kpFromCalc, setKpFromCal
           </div>
 
           {/* Variants */}
+          {autoCalcMode && variants.some(v => v._noRate) && (
+            <div style={{ padding: "8px 12px", background: "#FAEEDA", borderRadius: 8, marginBottom: 8, fontSize: 11, color: "#854F0B" }}>
+              ⚠ Для некоторых направлений ставки не найдены — заполни вручную
+            </div>
+          )}
           {variants.map((v, vi) => (
-            <div key={v.id} style={{ background: "var(--color-background-secondary)", borderRadius: 10, padding: 12, marginBottom: 8, position: "relative" }}>
+            <div key={v.id} style={{ background: v._noRate ? "var(--color-background-danger)" : "var(--color-background-secondary)", borderRadius: 10, padding: 12, marginBottom: 8, position: "relative" }}>
               {variants.length > 1 && (
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                   <div style={{ fontSize: 12, fontWeight: 600 }}>Вариант {vi + 1}</div>
@@ -1726,30 +1958,32 @@ function ProposalsTab({ proposals, leads, up, settings, kpFromCalc, setKpFromCal
 
           <button style={{ ...C.btn(), marginBottom: 10 }} onClick={addVariant}>+ Добавить вариант</button>
 
-          {/* Email template */}
-          <details style={{ marginBottom: 10 }}>
-            <summary style={{ fontSize: 12, cursor: "pointer", color: "var(--color-text-secondary)", fontWeight: 500 }}>Шаблон письма</summary>
-            <div style={{ marginTop: 6 }}>
-              <div style={C.lbl}>Вступление</div>
-              <textarea style={{ ...C.inp, minHeight: 50, fontSize: 11, fontFamily: "inherit" }} value={emailIntro} onChange={e => setEmailIntro(e.target.value)} />
-              <div style={{ ...C.lbl, marginTop: 6 }}>Подпись</div>
-              <textarea style={{ ...C.inp, minHeight: 40, fontSize: 11, fontFamily: "inherit" }} value={emailOutro} onChange={e => setEmailOutro(e.target.value)} />
-            </div>
-          </details>
+          {/* Preview info */}
+          <div style={{ fontSize: 11, color: "var(--color-text-secondary)", marginBottom: 6 }}>
+            Формат: {variants.length >= 3 ? "HTML-таблица" : "текстовый"} | Обращение: {contactFirstName ? `«Добрый день, ${contactFirstName}!»` : "«Добрый день!»"}
+          </div>
 
           {/* Full preview */}
-          <button style={C.btn()} onClick={() => setPreviewOpen(!previewOpen)}>{previewOpen ? "Скрыть" : "Превью письма"}</button>
+          <button style={C.btn()} onClick={() => setPreviewOpen(!previewOpen)}>{previewOpen ? "Скрыть превью" : "Превью письма"}</button>
           {previewOpen && (
-            <div style={{ marginTop: 8, padding: 12, background: "var(--color-background-primary)", border: "0.5px solid var(--color-border-tertiary)", borderRadius: 8, fontSize: 12, fontFamily: "monospace", whiteSpace: "pre-wrap", lineHeight: 1.7 }}>
-              {fullKPText}
+            <div style={{ marginTop: 8 }}>
+              {variants.length >= 3 ? (
+                <div style={{ border: "0.5px solid var(--color-border-tertiary)", borderRadius: 8, overflow: "hidden" }}>
+                  <div dangerouslySetInnerHTML={{ __html: fullKPHtml }} />
+                </div>
+              ) : (
+                <div style={{ padding: 12, background: "var(--color-background-primary)", border: "0.5px solid var(--color-border-tertiary)", borderRadius: 8, fontSize: 12, fontFamily: "monospace", whiteSpace: "pre-wrap", lineHeight: 1.7 }}>
+                  {fullKPText}
+                </div>
+              )}
             </div>
           )}
 
           {/* Actions */}
           <div style={{ display: "flex", gap: 6, marginTop: 12, justifyContent: "flex-end", alignItems: "center" }}>
             {leadId && <button style={{ ...C.btn(), fontSize: 11 }} onClick={() => { navigator.clipboard?.writeText(fullKPText); }}>Копировать текст</button>}
-            <button style={C.btn()} onClick={() => { setShow(false); setVariants([EMPTY_VARIANT()]); }}>Отмена</button>
-            <button style={C.btn(true)} onClick={saveKP} disabled={!leadId || !variants[0]?.freight_base}>Сохранить КП</button>
+            <button style={C.btn()} onClick={() => { setShow(false); setVariants([EMPTY_VARIANT()]); setAutoCalcMode(false); }}>Отмена</button>
+            <button style={C.btn(true)} onClick={saveKP} disabled={!leadId}>Сохранить КП</button>
           </div>
         </div>
       )}
