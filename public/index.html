@@ -1098,6 +1098,7 @@ function LeadDetail({ leads, touches, activities, up, doTouch, mkTouches, sel, s
   const [ef, setEf] = useState({});
   const [newPhone, setNewPhone] = useState("");
   const [newEmail, setNewEmail] = useState("");
+  const [newEmailCc, setNewEmailCc] = useState("");
   const [newRoute, setNewRoute] = useState({ port: "", city: "", ctype: "40HC", weight_kg: "" });
   const [selectedRoutes, setSelectedRoutes] = useState(new Set());
 
@@ -1114,6 +1115,9 @@ function LeadDetail({ leads, touches, activities, up, doTouch, mkTouches, sel, s
 
   const addEmail = () => { if (!newEmail.trim()) return; up("leads", p => p.map(l => l.id === sel ? { ...l, emails_kp: [...(l.emails_kp || []), newEmail.trim()] } : l)); setNewEmail(""); };
   const rmEmail = (i) => up("leads", p => p.map(l => l.id === sel ? { ...l, emails_kp: (l.emails_kp || []).filter((_, j) => j !== i) } : l));
+
+  const addEmailCc = () => { if (!newEmailCc.trim()) return; up("leads", p => p.map(l => l.id === sel ? { ...l, emails_cc: [...(l.emails_cc || []), newEmailCc.trim()] } : l)); setNewEmailCc(""); };
+  const rmEmailCc = (i) => up("leads", p => p.map(l => l.id === sel ? { ...l, emails_cc: (l.emails_cc || []).filter((_, j) => j !== i) } : l));
 
   const addRoute = () => { if (!newRoute.port && !newRoute.city) return; up("leads", p => p.map(l => l.id === sel ? { ...l, routes: [...(l.routes || []), { ...newRoute }] } : l)); setNewRoute({ port: "", city: "", ctype: "40HC", weight_kg: "" }); };
   const rmRoute = (i) => up("leads", p => p.map(l => l.id === sel ? { ...l, routes: (l.routes || []).filter((_, j) => j !== i) } : l));
@@ -1201,6 +1205,26 @@ function LeadDetail({ leads, touches, activities, up, doTouch, mkTouches, sel, s
               </div>
             </details>
           )}
+        </div>
+      </div>
+
+      {/* CC + Greeting */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 0 }}>
+        <div style={C.card}>
+          <div style={{ ...C.lbl, marginBottom: 6, fontSize: 12, fontWeight: 600, color: "var(--color-text-primary)" }}>Копия (CC)</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 6 }}>
+            {(lead.emails_cc || []).map((em, i) => <Chip key={i} onRemove={() => rmEmailCc(i)} color="var(--color-text-tertiary)">{em}</Chip>)}
+            {(lead.emails_cc || []).length === 0 && <span style={{ fontSize: 11, color: "var(--color-text-tertiary)" }}>Нет копий</span>}
+          </div>
+          <div style={{ display: "flex", gap: 4 }}>
+            <input style={{ ...C.inp, flex: 1, fontSize: 11 }} placeholder="cc@company.ru" value={newEmailCc} onChange={e => setNewEmailCc(e.target.value)} onKeyDown={e => e.key === "Enter" && addEmailCc()} />
+            <button style={{ ...C.btn(true), padding: "4px 10px", fontSize: 11 }} onClick={addEmailCc}>+</button>
+          </div>
+        </div>
+        <div style={C.card}>
+          <div style={{ ...C.lbl, marginBottom: 6, fontSize: 12, fontWeight: 600, color: "var(--color-text-primary)" }}>Обращение в письме</div>
+          <input style={C.inp} placeholder="Добрый день, Алексей!" value={lead.email_greeting || ""} onChange={e => up("leads", p => p.map(l => l.id === sel ? { ...l, email_greeting: e.target.value } : l))} />
+          <div style={{ fontSize: 10, color: "var(--color-text-tertiary)", marginTop: 4 }}>Если пусто — «Добрый день, {(lead.contact_name || "").split(" ")[0] || "..."}!»</div>
         </div>
       </div>
 
@@ -1640,22 +1664,23 @@ function formatKPVariant(v, idx) {
 }
 
 // Build HTML email with table for 3+ variants
-function buildKPEmailHtml(contactName, variants, signature) {
-  const greeting = contactName ? `Добрый день, ${contactName}!` : "Добрый день!";
+function buildKPEmailHtml(greeting, variants, signature, showDeparture) {
   const useTable = variants.length >= 3;
+  const fmtDep = d => { if (!d) return "под запрос"; const dt = new Date(d); if (isNaN(dt.getTime())) return d; return dt.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" }); };
 
   let body = "";
   if (useTable) {
     // Table format
+    const depHeader = showDeparture ? `<th style="padding:8px 10px;text-align:left;font-size:11px;color:#666;font-weight:600;text-transform:uppercase;border-bottom:2px solid #ddd;">Дата выхода</th>` : "";
     let rows = "";
     variants.forEach((v, i) => {
       const freightTotal = Number(v.freight_base || 0) + Number(v.freight_margin || 0);
       const railTotal = Number(v.railway_base || 0) + Number(v.railway_margin || 0);
       const autoStr = v.truck_on && v.truck_price ? `${Number(v.truck_price).toLocaleString("ru-RU")} ₽` : "—";
-      const depStr = v.departure_date || "под запрос";
+      const depCell = showDeparture ? `<td style="padding:8px 10px;font-size:13px;">${fmtDep(v.departure_date)}</td>` : "";
       rows += `<tr style="border-bottom:1px solid #e8e8e8;">
         <td style="padding:8px 10px;font-size:13px;">${v.port || "—"}</td>
-        <td style="padding:8px 10px;font-size:13px;">${depStr}</td>
+        ${depCell}
         <td style="padding:8px 10px;font-size:13px;">${v.railway_dest || "—"}</td>
         <td style="padding:8px 10px;font-size:13px;">${v.ctype}</td>
         <td style="padding:8px 10px;font-size:13px;">$${freightTotal}</td>
@@ -1666,7 +1691,7 @@ function buildKPEmailHtml(contactName, variants, signature) {
     body = `<table style="width:100%;border-collapse:collapse;margin:16px 0;" cellpadding="0" cellspacing="0">
       <thead><tr style="background:#f5f5f4;">
         <th style="padding:8px 10px;text-align:left;font-size:11px;color:#666;font-weight:600;text-transform:uppercase;border-bottom:2px solid #ddd;">Порт выхода</th>
-        <th style="padding:8px 10px;text-align:left;font-size:11px;color:#666;font-weight:600;text-transform:uppercase;border-bottom:2px solid #ddd;">Дата выхода</th>
+        ${depHeader}
         <th style="padding:8px 10px;text-align:left;font-size:11px;color:#666;font-weight:600;text-transform:uppercase;border-bottom:2px solid #ddd;">Станция назначения</th>
         <th style="padding:8px 10px;text-align:left;font-size:11px;color:#666;font-weight:600;text-transform:uppercase;border-bottom:2px solid #ddd;">Тип КТК</th>
         <th style="padding:8px 10px;text-align:left;font-size:11px;color:#666;font-weight:600;text-transform:uppercase;border-bottom:2px solid #ddd;">Фрахт (USD)</th>
@@ -1677,9 +1702,13 @@ function buildKPEmailHtml(contactName, variants, signature) {
     </table>`;
   } else {
     // Text format for 1-2 variants
+    const fmtDep2 = d => { if (!d) return "под запрос"; const dt = new Date(d); if (isNaN(dt.getTime())) return d; return dt.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" }); };
     const lines = variants.map((v, i) => {
       const header = variants.length > 1 ? `<br><b>Вариант ${i + 1}:</b><br>` : "<br>";
-      return header + formatKPVariant(v, i).replace(/\n/g, "<br>");
+      let text = formatKPVariant(v, i).replace(/\n/g, "<br>");
+      if (!showDeparture) text = text.replace(/<br>\s*Выход:.*?(?=<br>|$)/g, "");
+      else text = text.replace(/Выход:\s*(\d{4}-\d{2}-\d{2})/g, (m, d) => `Выход: ${fmtDep2(d)}`);
+      return header + text;
     }).join("");
     body = lines;
   }
@@ -1693,7 +1722,7 @@ function buildKPEmailHtml(contactName, variants, signature) {
 <div style="color:#8899aa;font-size:12px;margin-top:2px;">Коммерческое предложение</div>
 </div>
 <div style="padding:24px 28px;font-size:14px;line-height:1.7;color:#333;">
-${greeting}<br><br>Направляем Вам ставки по интересующим направлениям:
+${greeting}<br><br>Направляю Вам ставки по интересующим направлениям:
 ${body}
 </div>
 <div style="border-top:1px solid #e8e8e8;padding:16px 28px;font-size:12px;color:#888;line-height:1.6;">${sigHtml}</div>
@@ -1701,13 +1730,16 @@ ${body}
 }
 
 // Plain text version
-function buildKPPlainText(contactName, variants, signature) {
-  const greeting = contactName ? `Добрый день, ${contactName}!` : "Добрый день!";
+function buildKPPlainText(greeting, variants, signature, showDeparture) {
+  const fmtDep = d => { if (!d) return "под запрос"; const dt = new Date(d); if (isNaN(dt.getTime())) return d; return dt.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" }); };
   const body = variants.map((v, i) => {
     const header = variants.length > 1 ? `\nВариант ${i + 1}:\n` : "\n";
-    return header + formatKPVariant(v, i);
+    let text = formatKPVariant(v, i);
+    if (!showDeparture) text = text.replace(/\n\s*Выход:.*$/gm, "");
+    else text = text.replace(/Выход:\s*(\d{4}-\d{2}-\d{2})/g, (m, d) => `Выход: ${fmtDep(d)}`);
+    return header + text;
   }).join("\n");
-  return greeting + "\n\nНаправляем Вам ставки по интересующим направлениям:\n" + body + "\n\n" + signature;
+  return greeting + "\n\nНаправляю Вам ставки по интересующим направлениям:\n" + body + "\n\n" + signature;
 }
 
 function ProposalsTab({ proposals, leads, up, settings, kpFromCalc, setKpFromCalc, freight, boxes, drops, railway, autoMsk, customAuto }) {
@@ -1719,6 +1751,7 @@ function ProposalsTab({ proposals, leads, up, settings, kpFromCalc, setKpFromCal
   const [expandedKP, setExpandedKP] = useState(null);
   const [sending, setSending] = useState(null);
   const [autoCalcMode, setAutoCalcMode] = useState(false);
+  const [showDeparture, setShowDeparture] = useState(true);
 
   // Auto-fill from calculator (single variant)
   useEffect(() => {
@@ -1802,15 +1835,17 @@ function ProposalsTab({ proposals, leads, up, settings, kpFromCalc, setKpFromCal
     if (!proposal.emails || proposal.emails.length === 0) { alert("У лида нет почты для КП"); return; }
     setSending(proposal.id);
     try {
-      const res = await apiCall("POST", "/api/send", {
+      const payload = {
         to: proposal.emails,
         subject: "Коммерческое предложение — BML Transport & Consulting",
         body: proposal.text,
         html: proposal.html || undefined,
-      });
+      };
+      if (proposal.emails_cc && proposal.emails_cc.length > 0) payload.cc = proposal.emails_cc;
+      const res = await apiCall("POST", "/api/send", payload);
       if (res.ok) {
         up("proposals", p => p.map(x => x.id === proposal.id ? { ...x, status: "sent", sent: new Date().toISOString() } : x));
-        alert("Отправлено на " + proposal.emails.join(", "));
+        alert("Отправлено на " + proposal.emails.join(", ") + (proposal.emails_cc?.length ? " (CC: " + proposal.emails_cc.join(", ") + ")" : ""));
       } else {
         alert("Ошибка: " + (res.error || JSON.stringify(res)));
       }
@@ -1820,26 +1855,28 @@ function ProposalsTab({ proposals, leads, up, settings, kpFromCalc, setKpFromCal
 
   const selectedLead = leads.find(l => l.id === leadId);
   const kpEmails = selectedLead?.emails_kp || [];
+  const kpEmailsCc = selectedLead?.emails_cc || [];
   const contactFirstName = (selectedLead?.contact_name || "").split(" ")[0] || "";
+  const emailGreeting = selectedLead?.email_greeting || (contactFirstName ? `Добрый день, ${contactFirstName}!` : "Добрый день!");
 
   const addVariant = () => setVariants(p => [...p, EMPTY_VARIANT()]);
   const rmVariant = (id) => setVariants(p => p.filter(v => v.id !== id));
   const updVariant = (id, field, val) => setVariants(p => p.map(v => v.id === id ? { ...v, [field]: val } : v));
 
   const fullKPText = useMemo(() => {
-    return buildKPPlainText(contactFirstName, variants, EMAIL_SIGNATURE);
-  }, [variants, contactFirstName]);
+    return buildKPPlainText(emailGreeting, variants, EMAIL_SIGNATURE, showDeparture);
+  }, [variants, emailGreeting, showDeparture]);
 
   const fullKPHtml = useMemo(() => {
-    return buildKPEmailHtml(contactFirstName, variants, EMAIL_SIGNATURE);
-  }, [variants, contactFirstName]);
+    return buildKPEmailHtml(emailGreeting, variants, EMAIL_SIGNATURE, showDeparture);
+  }, [variants, emailGreeting, showDeparture]);
 
   const saveKP = () => {
     const lead = leads.find(l => l.id === leadId);
     up("proposals", p => [...p, {
       id: uid(), lead_id: leadId, company: lead?.company_name || "",
       type: kpType, variants: variants.map(v => { const { _calcResult, _noRate, ...rest } = v; return rest; }),
-      text: fullKPText, html: fullKPHtml, emails: kpEmails,
+      text: fullKPText, html: fullKPHtml, emails: kpEmails, emails_cc: kpEmailsCc,
       ver: p.filter(x => x.lead_id === leadId).length + 1,
       status: "draft", created: new Date().toISOString(), sent: null,
       rateSnapshot: variants.map(v => ({
@@ -1867,8 +1904,9 @@ function ProposalsTab({ proposals, leads, up, settings, kpFromCalc, setKpFromCal
                 <option value="">Выбрать...</option>
                 {leads.filter(l => !["lost"].includes(l.status)).map(l => <option key={l.id} value={l.id}>{l.company_name}</option>)}
               </select>
-              {kpEmails.length > 0 && <div style={{ fontSize: 11, color: "var(--color-text-info)", marginTop: 3 }}>→ {kpEmails.join(", ")}</div>}
+              {kpEmails.length > 0 && <div style={{ fontSize: 11, color: "var(--color-text-info)", marginTop: 3 }}>→ {kpEmails.join(", ")}{kpEmailsCc.length > 0 ? ` (CC: ${kpEmailsCc.join(", ")})` : ""}</div>}
               {kpEmails.length === 0 && leadId && <div style={{ fontSize: 11, color: "#A32D2D", marginTop: 3 }}>Нет почты для КП! Добавь в карточке лида.</div>}
+              {leadId && <div style={{ fontSize: 10, color: "var(--color-text-tertiary)", marginTop: 2 }}>Обращение: «{emailGreeting}»</div>}
             </div>
             <div>
               <div style={C.lbl}>Тип КП</div>
@@ -1959,8 +1997,12 @@ function ProposalsTab({ proposals, leads, up, settings, kpFromCalc, setKpFromCal
           <button style={{ ...C.btn(), marginBottom: 10 }} onClick={addVariant}>+ Добавить вариант</button>
 
           {/* Preview info */}
-          <div style={{ fontSize: 11, color: "var(--color-text-secondary)", marginBottom: 6 }}>
-            Формат: {variants.length >= 3 ? "HTML-таблица" : "текстовый"} | Обращение: {contactFirstName ? `«Добрый день, ${contactFirstName}!»` : "«Добрый день!»"}
+          <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 6, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11, color: "var(--color-text-secondary)" }}>Формат: {variants.length >= 3 ? "HTML-таблица" : "текстовый"}</span>
+            <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, cursor: "pointer" }}>
+              <input type="checkbox" checked={showDeparture} onChange={e => setShowDeparture(e.target.checked)} />
+              Показать дату выхода
+            </label>
           </div>
 
           {/* Full preview */}
