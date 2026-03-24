@@ -458,7 +458,7 @@ function calcChain({ freight, boxes, drops, railway, autoMsk, customAuto, settin
         const rt = r.terminal.toLowerCase();
         const rc = r.city.trim().toLowerCase();
         const qc = city.trim().toLowerCase();
-        const cityMatch = rc === qc || rc.startsWith(qc + " ") || qc.startsWith(rc + " ");
+        const cityMatch = rc === qc;
         if (!cityMatch) return false;
         return rt.includes(searchTerm) || searchTerm.includes(rt);
       });
@@ -487,7 +487,7 @@ function calcChain({ freight, boxes, drops, railway, autoMsk, customAuto, settin
           const rt = r.terminal.toLowerCase();
           const rc = r.city.trim().toLowerCase();
           const qc = city.trim().toLowerCase();
-          if (rc !== qc && !rc.startsWith(qc + " ") && !qc.startsWith(rc + " ")) return false;
+          if (rc !== qc) return false;
           if (termLower.includes(rt) || rt.includes(termLower)) return true;
           const parts = termLower.split(/[\/,]/);
           return parts.some(tp => tp.trim() && (rt.includes(tp.trim()) || tp.trim().includes(rt)));
