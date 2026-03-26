@@ -57,12 +57,6 @@ export function App({ onLogout }) {
     const lead = data.leads.find(l => l.id === lid);
     const d = today();
 
-    // 1. Mark touch as done
-    up("touches", p => p.map(t => t.id === tid ? { ...t, status: "done", done: d, outcome, note } : t));
-
-    // 2. Log activity
-    up("activities", p => [...p, { id: uid(), lead_id: lid, type: "touch", content: `${ref.label}: ${note}`, outcome, at: new Date().toISOString() }]);
-
     // Helper: max touch num for this lead
     const maxNum = () => data.touches.filter(t => t.lead_id === lid).reduce((m, t) => Math.max(m, t.num || 0), 0);
 
@@ -70,6 +64,43 @@ export function App({ onLogout }) {
     const hasEmail = lead && ((lead.emails_kp || []).length > 0 || (lead.emails_raw || []).length > 0);
     const hasRoutes = lead && (lead.routes || []).length > 0;
     const canSendKP = hasEmail && hasRoutes;
+
+    // ─── DIAL FAIL — handle separately, before marking touch as done ───
+    if (outcome === "dial_fail") {
+      const dialFails = (ref.dial_fails || 0) + 1;
+      // Log dial attempt
+      up("activities", p => [...p, { id: uid(), lead_id: lid, type: "dial_attempt", content: `${ref.label}: недозвон #${dialFails}`, outcome: "dial_fail", at: new Date().toISOString() }]);
+
+      if (dialFails >= 3) {
+        // 3 failed dials — NOW mark touch as done (exhausted), advance
+        up("touches", p => p.map(t => t.id === tid ? { ...t, status: "done", done: d, outcome: "dial_fail", note: `${dialFails} недозвонов`, dial_fails: dialFails } : t));
+        // Adapt next touch if needed
+        const scheduled = data.touches.filter(t => t.lead_id === lid && t.status === "scheduled" && t.id !== tid);
+        if (scheduled.length > 0) {
+          const next = scheduled.sort((a, b) => (a.num || 0) - (b.num || 0))[0];
+          if ((next.type === "proposal" || next.type === "email") && !canSendKP) {
+            up("touches", p => p.map(t => t.id === next.id ? {
+              ...t, type: "call",
+              label: "Повторный звонок (вместо КП)",
+              desc: "Нет email/маршрута — сначала дозвонись",
+              hint: "Цель: узнать email, порт, город. Без данных КП нельзя.",
+            } : t));
+          }
+        } else if (ref.num >= 6) {
+          up("leads", p => p.map(l => l.id === lid ? { ...l, status: "frozen", frozen_reason: "Не удалось дозвониться", frozen_date: d } : l));
+        }
+      } else {
+        // Reschedule SAME touch for tomorrow — don't mark as done
+        up("touches", p => p.map(t => t.id === tid ? { ...t, date: addDays(d, 1), dial_fails: dialFails } : t));
+      }
+      return; // Exit — don't run steps 1-2-3
+    }
+
+    // 1. Mark touch as done
+    up("touches", p => p.map(t => t.id === tid ? { ...t, status: "done", done: d, outcome, note } : t));
+
+    // 2. Log activity
+    up("activities", p => [...p, { id: uid(), lead_id: lid, type: "touch", content: `${ref.label}: ${note}`, outcome, at: new Date().toISOString() }]);
 
     // 3. Handle outcome-specific logic
     if (outcome === "interested") {
@@ -229,7 +260,7 @@ export function App({ onLogout }) {
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
           <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: "-0.3px" }}>BML</div>
           <div style={{ fontSize: 11, color: "var(--color-text-tertiary)", fontWeight: 400 }}>Sales Panel</div>
-          <span style={{ fontSize: 9, color: "var(--color-text-tertiary)", background: "var(--color-background-secondary)", padding: "1px 6px", borderRadius: 4, marginLeft: 2 }}>v4.3.0</span>
+          <span style={{ fontSize: 9, color: "var(--color-text-tertiary)", background: "var(--color-background-secondary)", padding: "1px 6px", borderRadius: 4, marginLeft: 2 }}>v4.3.1</span>
           <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
             <button style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, color: "var(--color-text-tertiary)", fontFamily: "inherit" }} onClick={() => { if (confirm("Выйти из CRM?")) { setApiKey(""); onLogout(); } }}>Выйти ↗</button>
           </div>

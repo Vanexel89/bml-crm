@@ -10,6 +10,7 @@ export const OUTCOMES = {
   objection:   { l: "Возражение",    c: "#854F0B", bg: "#FAEEDA", icon: "⚡" },
   callback:    { l: "Перезвонить",   c: "#185FA5", bg: "#E6F1FB", icon: "↻" },
   sent:        { l: "Отправлено",    c: "#534AB7", bg: "#EEEDFE", icon: "📨" },
+  dial_fail:   { l: "Недозвон",      c: "#6B7280", bg: "#F3F4F6", icon: "📵" },
   no_answer:   { l: "Нет ответа",    c: "#888780", bg: "#F1EFE8", icon: "—" },
   rejected:    { l: "Отказ",         c: "#A32D2D", bg: "#FCEBEB", icon: "✗" },
 };

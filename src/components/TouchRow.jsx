@@ -43,7 +43,7 @@ export function TouchRow({ t, doTouch }) {
   const spinFocus = t.spin_focus && SPIN_QUESTIONS[t.spin_focus];
 
   return (
-    <div style={{ borderRadius: 10, marginBottom: 6, background: done || canc ? "var(--color-background-secondary)" : over ? "var(--color-background-danger)" : "var(--color-background-primary)", border: done || canc ? "none" : "0.5px solid var(--color-border-tertiary)", opacity: done || canc ? 0.55 : 1, borderLeft: `3px solid ${done || canc ? "transparent" : tc}` }}>
+    <div data-touch-row="1" style={{ borderRadius: 10, marginBottom: 6, background: done || canc ? "var(--color-background-secondary)" : over ? "var(--color-background-danger)" : "var(--color-background-primary)", border: done || canc ? "none" : "0.5px solid var(--color-border-tertiary)", opacity: done || canc ? 0.55 : 1, borderLeft: `3px solid ${done || canc ? "transparent" : tc}` }}>
       {/* Main row */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px" }}>
         <Badge color={tc} bg={tbg} style={{ fontWeight: 700 }}>{t.num}</Badge>
@@ -91,7 +91,7 @@ export function TouchRow({ t, doTouch }) {
 
       {/* Expanded action panel */}
       {open && (
-        <div data-touch-row="1" style={{ padding: "0 12px 12px" }}>
+        <div style={{ padding: "0 12px 12px" }}>
           {/* Phase: outcome selection */}
           {phase === "outcome" && (
             <div>
@@ -123,12 +123,21 @@ export function TouchRow({ t, doTouch }) {
                 <>
                   <div style={{ fontSize: 11, color: "var(--color-text-secondary)", marginBottom: 6 }}>Результат касания:</div>
                   <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 8 }}>
-                    {Object.entries(OUTCOMES).filter(([k]) => k !== "sent").map(([k, v]) => (
+                    {(t.type === "call" ? [
+                      ["interested", OUTCOMES.interested],
+                      ["objection", OUTCOMES.objection],
+                      ["callback", OUTCOMES.callback],
+                      ["dial_fail", OUTCOMES.dial_fail],
+                      ["no_answer", { ...OUTCOMES.no_answer, l: "Говорил, без толку" }],
+                      ["rejected", OUTCOMES.rejected],
+                    ] : Object.entries(OUTCOMES).filter(([k]) => k !== "sent" && k !== "dial_fail")
+                    ).map(([k, v]) => (
                       <button key={k} style={{ ...C.btn(), fontSize: 11, padding: "5px 10px", borderColor: v.c, color: v.c }}
                         onClick={() => {
                           if (k === "interested") submit("interested");
                           else if (k === "objection") setPhase("objection");
                           else if (k === "callback") setPhase("callback");
+                          else if (k === "dial_fail") submit("dial_fail", "Недозвон");
                           else if (k === "no_answer") submit("no_answer");
                           else if (k === "rejected") setPhase("reject");
                         }}>
