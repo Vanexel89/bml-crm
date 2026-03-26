@@ -69,7 +69,14 @@ export function LeadDetail({ leads, touches, activities, proposals, up, doTouch,
             </select>
           </div>
         </div>
-        {lead.contact_name && <div style={{ fontSize: 12, marginTop: 8 }}>ЛПР: <strong>{lead.contact_name}</strong>{lead.greeting_name && <span style={{ color: "var(--color-text-secondary)" }}> (обращение: {lead.greeting_name})</span>} {lead.website && <span style={{ color: "var(--color-text-tertiary)" }}>| {lead.website}</span>}</div>}
+        {lead.contact_name && <div style={{ fontSize: 12, marginTop: 8 }}>ЛПР: <strong>{lead.contact_name}</strong> {lead.website && <span style={{ color: "var(--color-text-tertiary)" }}>| {lead.website}</span>}</div>}
+        {/* Greeting name — always visible and editable */}
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
+          <span style={{ fontSize: 11, color: "var(--color-text-secondary)", whiteSpace: "nowrap" }}>Обращение:</span>
+          <input style={{ ...C.inp, width: 160, fontSize: 12, padding: "4px 8px" }} value={lead.greeting_name || ""} placeholder="Елена, Димитрий..."
+            onChange={e => up("leads", p => p.map(l => l.id === sel ? { ...l, greeting_name: e.target.value } : l))} />
+          <span style={{ fontSize: 10, color: "var(--color-text-tertiary)" }}>→ «{lead.greeting_name || "—"}, добрый день.»</span>
+        </div>
         {lead.comment && <div style={{ fontSize: 11, color: "var(--color-text-tertiary)", marginTop: 4, fontStyle: "italic" }}>{lead.comment}</div>}
 
         {/* Active objection display with LAER */}
@@ -241,21 +248,21 @@ export function LeadDetail({ leads, touches, activities, proposals, up, doTouch,
 
       {/* Sent KP block */}
       {(() => {
-        const leadKPs = (proposals || []).filter(p => p.lead_id === sel && p.status === "sent").sort((a, b) => (b.sent || b.created || "").localeCompare(a.sent || a.created || ""));
+        const leadKPs = (proposals || []).filter(p => p.lead_id === sel).sort((a, b) => (b.sent || b.created || "").localeCompare(a.sent || a.created || ""));
         if (leadKPs.length === 0) return null;
         return (
           <div style={{ marginTop: 12 }}>
-            <div style={C.section}>Отправленные КП <Badge color="#534AB7" bg="#EEEDFE">{leadKPs.length}</Badge></div>
+            <div style={C.section}>КП <Badge color="#534AB7" bg="#EEEDFE">{leadKPs.length}</Badge></div>
             {leadKPs.slice(0, 5).map(kp => (
-              <div key={kp.id} style={{ ...C.card, padding: "8px 12px", display: "flex", alignItems: "center", gap: 8, borderLeft: "3px solid #534AB7" }}>
-                <Badge color="#534AB7" bg="#EEEDFE">#{kp.ver || 1}</Badge>
+              <div key={kp.id} style={{ ...C.card, padding: "8px 12px", display: "flex", alignItems: "center", gap: 8, borderLeft: `3px solid ${kp.status === "sent" ? "#534AB7" : "#6B7280"}` }}>
+                <Badge color={kp.status === "sent" ? "#3B6D11" : "#6B7280"} bg={kp.status === "sent" ? "#EAF3DE" : "#F3F4F6"}>{kp.status === "sent" ? "отпр." : "черн."}</Badge>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 12, fontWeight: 500 }}>{kp.company || lead.company_name}</div>
+                  <div style={{ fontSize: 12, fontWeight: 500 }}>#{kp.ver || 1} {kp.company || lead.company_name}</div>
                   <div style={{ fontSize: 11, color: "var(--color-text-secondary)" }}>
                     {kp.variants?.map(v => `${v.port}→${v.city}`).join(", ") || "—"} | {fmtFull(kp.sent || kp.created)}
                   </div>
                 </div>
-                {kp.emails && <span style={{ fontSize: 10, color: "var(--color-text-tertiary)" }}>→ {kp.emails.join(", ")}</span>}
+                {kp.emails && kp.emails.length > 0 && <span style={{ fontSize: 10, color: "var(--color-text-tertiary)" }}>→ {kp.emails.join(", ")}</span>}
               </div>
             ))}
           </div>
