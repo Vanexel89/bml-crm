@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Badge } from './ui.jsx';
-import { C, GRADE } from '../constants.js';
+import { C, GRADE, STATUS } from '../constants.js';
 import { today, fmt, fmtFull, addDays, weekAgo } from '../utils.js';
 import { calcChain } from '../rates/calcChain.js';
 
@@ -65,6 +65,22 @@ export function Dashboard({ leads, touches, activities, proposals, doTouch, setS
 
   const frozen = leads.filter(l => l.status === "frozen").slice(0, 5);
 
+  // Mini-funnel counts
+  const miniFunnel = useMemo(() => {
+    const stages = ["new", "contact", "qualified", "proposal_sent", "negotiation", "won"];
+    return stages.map(s => ({ key: s, label: STATUS[s]?.l, color: STATUS[s]?.c, count: leads.filter(l => l.status === s).length }));
+  }, [leads]);
+
+  // Today KPI
+  const todayKpi = useMemo(() => {
+    const todayTouches = touches.filter(t => t.done === d);
+    return {
+      calls: todayTouches.filter(t => t.type === "call").length,
+      kp: proposals.filter(p => p.created?.startsWith(d)).length,
+      convs: todayTouches.filter(t => t.outcome && t.outcome !== "no_answer").length,
+    };
+  }, [touches, proposals, d]);
+
   return (
     <div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8, marginBottom: 16 }}>
@@ -80,6 +96,48 @@ export function Dashboard({ leads, touches, activities, proposals, doTouch, setS
             <div style={{ fontSize: 22, fontWeight: 700, color: c || "var(--color-text-primary)", letterSpacing: "-0.5px" }}>{v}</div>
           </div>
         ))}
+      </div>
+
+      {/* Mini-funnel */}
+      <div style={{ ...C.card, padding: "10px 14px", marginBottom: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+          <span style={{ fontSize: 12, fontWeight: 600 }}>Воронка</span>
+          <button style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, color: "var(--color-text-info)", fontFamily: "inherit" }} onClick={() => setTab("analytics")}>Подробнее →</button>
+        </div>
+        <div style={{ display: "flex", gap: 2, height: 32, borderRadius: 6, overflow: "hidden" }}>
+          {miniFunnel.map(s => s.count > 0 ? (
+            <div key={s.key} style={{ flex: s.count, background: s.color + "22", display: "flex", alignItems: "center", justifyContent: "center", minWidth: 28 }}>
+              <span style={{ fontSize: 11, fontWeight: 600, color: s.color }}>{s.count}</span>
+            </div>
+          ) : null)}
+        </div>
+        <div style={{ display: "flex", gap: 10, marginTop: 6, flexWrap: "wrap" }}>
+          {miniFunnel.filter(s => s.count > 0).map(s => (
+            <span key={s.key} style={{ fontSize: 11, display: "flex", alignItems: "center", gap: 3 }}>
+              <span style={{ width: 7, height: 7, borderRadius: 3, background: s.color, display: "inline-block" }} />
+              <span style={{ color: "var(--color-text-secondary)" }}>{s.label}:</span>
+              <strong style={{ color: s.color }}>{s.count}</strong>
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {/* Today KPI mini */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+        {[
+          ["Звонков", todayKpi.calls, 40, "#0F6E56"],
+          ["КП", todayKpi.kp, 5, "#534AB7"],
+          ["Разговоров", todayKpi.convs, 15, "#185FA5"],
+        ].map(([l, v, plan, c], i) => {
+          const pct = Math.min(100, Math.round(v / plan * 100));
+          return (
+            <div key={i} style={{ ...C.metric, flex: 1, position: "relative", overflow: "hidden" }}>
+              <div style={{ position: "absolute", bottom: 0, left: 0, width: `${pct}%`, height: 3, background: c, borderRadius: "0 2px 0 0", transition: "width 0.3s" }} />
+              <div style={{ fontSize: 10, color: "var(--color-text-tertiary)", marginBottom: 2, textTransform: "uppercase" }}>Сегодня {l}</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: c }}>{v} <span style={{ fontSize: 11, fontWeight: 400, color: "var(--color-text-tertiary)" }}>/ {plan}</span></div>
+            </div>
+          );
+        })}
       </div>
 
       {rateAlerts.length > 0 && (

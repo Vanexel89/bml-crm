@@ -9,6 +9,7 @@ import { RatesTab } from './RatesTab.jsx';
 import { CalcTab } from './CalcTab.jsx';
 import { ProposalsTab } from './ProposalsTab.jsx';
 import { PatternsTab } from './PatternsTab.jsx';
+import { AnalyticsTab } from './AnalyticsTab.jsx';
 import { SettingsTab } from './SettingsTab.jsx';
 
 export function App({ onLogout }) {
@@ -146,7 +147,7 @@ export function App({ onLogout }) {
 
   const ctx = { ...data, up, mkTouches, doTouch, sel, setSel, setTab, importRates, onLogout, goToKP, goToKPFromLead, kpFromCalc, setKpFromCalc, logoB64 };
   const taskCnt = data.touches.filter(t => t.status === "scheduled" && t.date <= today()).length;
-  const tabs = [["dashboard", "Мой день", taskCnt], ["leads", "Лиды", data.leads.length], ["rates", "Ставки", data.freight.length], ["calculator", "Калькулятор", 0], ["proposals", "КП", data.proposals.length], ["patterns", "Паттерны", 0], ["settings", "Настройки", 0]];
+  const tabs = [["dashboard", "Мой день", taskCnt], ["leads", "Лиды", data.leads.length], ["analytics", "Аналитика", 0], ["rates", "Ставки", data.freight.length], ["calculator", "Калькулятор", 0], ["proposals", "КП", data.proposals.length], ["patterns", "Паттерны", 0], ["settings", "Настройки", 0]];
 
   return (
     <div style={{ fontFamily: "'Inter', system-ui, -apple-system, sans-serif", fontSize: 13, color: "var(--color-text-primary)", minHeight: "100vh", background: "var(--color-background-tertiary)", padding: "0" }}>
@@ -154,7 +155,7 @@ export function App({ onLogout }) {
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
           <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: "-0.3px" }}>BML</div>
           <div style={{ fontSize: 11, color: "var(--color-text-tertiary)", fontWeight: 400 }}>Sales Panel</div>
-          <span style={{ fontSize: 9, color: "var(--color-text-tertiary)", background: "var(--color-background-secondary)", padding: "1px 6px", borderRadius: 4, marginLeft: 2 }}>v4.1.0</span>
+          <span style={{ fontSize: 9, color: "var(--color-text-tertiary)", background: "var(--color-background-secondary)", padding: "1px 6px", borderRadius: 4, marginLeft: 2 }}>v4.2.0</span>
           <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
             <button style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, color: "var(--color-text-tertiary)", fontFamily: "inherit" }} onClick={() => { if (confirm("Выйти из CRM?")) { setApiKey(""); onLogout(); } }}>Выйти ↗</button>
           </div>
@@ -177,6 +178,7 @@ export function App({ onLogout }) {
       <div style={{ padding: "0 12px 20px" }}>
         {tab === "dashboard" && <Dashboard {...ctx} />}
         {tab === "leads" && (sel ? <LeadDetail {...ctx} /> : <LeadsList {...ctx} />)}
+        {tab === "analytics" && <AnalyticsTab {...ctx} />}
         {tab === "rates" && <RatesTab {...ctx} />}
         {tab === "calculator" && <CalcTab {...ctx} />}
         {tab === "proposals" && <ProposalsTab {...ctx} />}
