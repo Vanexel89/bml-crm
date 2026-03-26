@@ -18,7 +18,7 @@ const SMTP_USER = process.env.SMTP_USER || "";
 const SMTP_PASS = process.env.SMTP_PASS || "";
 const FROM_NAME = process.env.FROM_NAME || "Dorofeev Vitaliy / BML DV";
 const FROM_EMAIL = process.env.FROM_EMAIL || "";
-const LOGO_URL = process.env.LOGO_URL || "";
+const LOGO_URL = process.env.LOGO_URL || "http://80.71.159.26/logo.png";
 
 function auth(req, res, next) {
   const key = req.headers["x-api-key"];
@@ -110,12 +110,11 @@ app.post("/api/send", auth, async (req, res) => {
 
 function buildEmailHtml(text) {
   const esc = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>");
-  const logo = LOGO_URL ? '<img src="' + LOGO_URL + '" alt="BM Logistics" style="height:50px;margin-bottom:12px;"/><br>' : "";
+  const logo = LOGO_URL ? '<img src="' + LOGO_URL + '" alt="BML DV" style="height:40px;margin-bottom:8px;"/><br>' : "";
   return '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;">' +
     '<div style="max-width:640px;margin:20px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.1);">' +
-    '<div style="background:#1a2332;padding:20px 28px;">' + logo + '<div style="color:#fff;font-size:18px;font-weight:700;">Dorofeev Vitaliy / BML DV</div></div>' +
     '<div style="padding:24px 28px;font-size:14px;line-height:1.7;color:#333;">' + esc + '</div>' +
-    '<div style="border-top:1px solid #e8e8e8;padding:16px 28px;font-size:12px;color:#888;line-height:1.6;"><strong style="color:#333;">BM Logistics</strong> — TBM Pacific Group<br>Контейнерные перевозки Китай → Россия<br><a href="https://bml-dv.com" style="color:#1a73e8;text-decoration:none;">bml-dv.com</a></div>' +
+    '<div style="border-top:1px solid #e8e8e8;padding:16px 28px;font-size:12px;color:#888;line-height:1.6;">' + logo + '<strong style="color:#333;">Dorofeev Vitaliy</strong> | Deputy Director<br>BML Transport & Consulting<br>Tel. +7 495 568 1989 | Mob. +7 915 314 7855<br><a href="https://bml-dv.com" style="color:#1a73e8;text-decoration:none;">bml-dv.com</a></div>' +
     '</div></body></html>';
 }
 

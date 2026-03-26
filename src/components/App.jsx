@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { load, save, setApiKey } from '../api.js';
 import { KEYS, TOUCHES_TPL, REACTIVATION_TPL, OBJECTION_TREE, RATE_CHECK_INTERVAL_DAYS, LOGO_URL, C } from '../constants.js';
 import { uid, today, addDays, calcGrade } from '../utils.js';
+import { calcChain } from '../rates/calcChain.js';
 import { Dashboard } from './Dashboard.jsx';
 import { LeadsList } from './LeadsList.jsx';
 import { LeadDetail } from './LeadDetail.jsx';
@@ -202,41 +203,66 @@ export function App({ onLogout }) {
     });
   }, [ready]);
 
-  // ─── Auto-tasks when rates change (every RATE_CHECK_INTERVAL_DAYS) ───
+  // ─── Auto-tasks when rates change — real comparison per variant ───
   useEffect(() => {
     if (!ready || !data.freight || data.freight.length === 0) return;
     const d = today();
-    // Check leads with proposals where rates might have changed
     const activeStatuses = ["proposal_sent", "negotiation", "frozen"];
     data.leads.forEach(l => {
       if (!activeStatuses.includes(l.status)) return;
-      if (!l.routes || l.routes.length === 0) return;
-      // Check if we already created a rate-update task recently
+      // Check if we already have a scheduled rate-update task
       const recentRateTask = data.touches.some(t =>
-        t.lead_id === l.id && t.label === "Обновить ставку" && t.status === "scheduled"
+        t.lead_id === l.id && t.label?.startsWith("Обновить ставку") && t.status === "scheduled"
       );
       if (recentRateTask) return;
-      // Check last rate-update task done date
-      const lastRateTask = data.touches
-        .filter(t => t.lead_id === l.id && t.label === "Обновить ставку" && t.done)
-        .sort((a, b) => b.done.localeCompare(a.done))[0];
-      if (lastRateTask && addDays(lastRateTask.done, RATE_CHECK_INTERVAL_DAYS) > d) return;
-      // Check if last KP was sent > RATE_CHECK_INTERVAL_DAYS ago
+      // Find last sent KP with rate snapshot
       const lastKP = data.proposals
-        .filter(p => p.lead_id === l.id && p.status === "sent")
+        .filter(p => p.lead_id === l.id && p.status === "sent" && p.rateSnapshot)
         .sort((a, b) => (b.sent || b.created || "").localeCompare(a.sent || a.created || ""))[0];
       if (!lastKP) return;
       const kpDate = (lastKP.sent || lastKP.created || "").slice(0, 10);
-      if (kpDate && addDays(kpDate, RATE_CHECK_INTERVAL_DAYS) <= d) {
-        up("touches", p => [...p, {
-          id: uid(), lead_id: l.id, num: 200,
-          type: "proposal", label: "Обновить ставку",
-          desc: "Прошло " + RATE_CHECK_INTERVAL_DAYS + " дней с последнего КП. Проверь ставки.",
-          hint: "Пересчитай ставку. Если изменилась — отправь обновлённый расчёт с пометкой «ставки обновились».",
-          challenger: "", spin_focus: null,
-          date: d, done: null, status: "scheduled", outcome: null, note: "",
-        }]);
-      }
+      // Only check if KP was sent > 14 days ago
+      if (!kpDate || addDays(kpDate, RATE_CHECK_INTERVAL_DAYS) > d) return;
+      // Check last done rate-update
+      const lastDone = data.touches
+        .filter(t => t.lead_id === l.id && t.label?.startsWith("Обновить ставку") && t.done)
+        .sort((a, b) => b.done.localeCompare(a.done))[0];
+      if (lastDone && addDays(lastDone.done, RATE_CHECK_INTERVAL_DAYS) > d) return;
+      // Compare each variant with current rates
+      const changes = [];
+      (lastKP.rateSnapshot || []).forEach(snap => {
+        if (!snap.port || !snap.city) return;
+        try {
+          const ctype = (snap.ctype || "40HC").includes("20") ? "20" : "40";
+          const results = calcChain(
+            { freight: data.freight, boxes: data.boxes, drops: data.drops, railway: data.railway, autoMsk: data.autoMsk, customAuto: data.customAuto, settings: data.settings || {} },
+            { pol: snap.port, city: snap.city, ctype, weight: 22 }
+          );
+          if (results.length > 0) {
+            const best = results[0];
+            const oldF = snap.freightBase || 0;
+            const newF = best.isRubFreight ? 0 : best.totalFreightUsd;
+            const oldR = snap.railwayBase || 0;
+            const newR = best.rwBase;
+            if (newF < oldF) changes.push(`${snap.port}→${snap.city}: фрахт $${oldF}→$${newF}`);
+            if (newR < oldR) changes.push(`${snap.port}→${snap.city}: ЖД ${oldR.toLocaleString("ru")}→${newR.toLocaleString("ru")}₽`);
+          }
+        } catch {}
+      });
+      // Create task with details of what changed
+      const desc = changes.length > 0
+        ? "Ставки снизились: " + changes.slice(0, 3).join("; ")
+        : "Прошло " + RATE_CHECK_INTERVAL_DAYS + " дней с последнего КП. Проверь ставки.";
+      up("touches", p => [...p, {
+        id: uid(), lead_id: l.id, num: 200,
+        type: "proposal", label: changes.length > 0 ? "Обновить ставку — дешевле!" : "Обновить ставку",
+        desc,
+        hint: changes.length > 0
+          ? "Ставка реально снизилась. Отправь обновлённый расчёт с пометкой — клиент оценит."
+          : "Пересчитай ставку. Если изменилась — отправь обновлённый расчёт.",
+        challenger: "", spin_focus: null,
+        date: d, done: null, status: "scheduled", outcome: null, note: "",
+      }]);
     });
   }, [ready, data.freight]);
 
@@ -260,7 +286,7 @@ export function App({ onLogout }) {
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
           <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: "-0.3px" }}>BML</div>
           <div style={{ fontSize: 11, color: "var(--color-text-tertiary)", fontWeight: 400 }}>Sales Panel</div>
-          <span style={{ fontSize: 9, color: "var(--color-text-tertiary)", background: "var(--color-background-secondary)", padding: "1px 6px", borderRadius: 4, marginLeft: 2 }}>v4.5.2</span>
+          <span style={{ fontSize: 9, color: "var(--color-text-tertiary)", background: "var(--color-background-secondary)", padding: "1px 6px", borderRadius: 4, marginLeft: 2 }}>v4.6.0</span>
           <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
             <button style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, color: "var(--color-text-tertiary)", fontFamily: "inherit" }} onClick={() => { if (confirm("Выйти из CRM?")) { setApiKey(""); onLogout(); } }}>Выйти ↗</button>
           </div>

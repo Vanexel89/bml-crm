@@ -5,7 +5,7 @@ import { C, STATUS, GRADE, OBJECTION_TREE, OBJECTION_SCRIPTS, SPIN_QUESTIONS, CH
 import { uid, today, fmt, fmtFull, addDays, calcGrade } from '../utils.js';
 import { apiCall } from '../api.js';
 
-export function LeadDetail({ leads, touches, activities, proposals, up, doTouch, mkTouches, sel, setSel, freight, railway, goToKPFromLead }) {
+export function LeadDetail({ leads, touches, activities, proposals, up, doTouch, mkTouches, sel, setSel, setTab, freight, railway, goToKPFromLead }) {
   const lead = leads.find(l => l.id === sel);
   const lt = useMemo(() => touches.filter(t => t.lead_id === sel).sort((a, b) => (a.num || 0) - (b.num || 0)), [touches, sel]);
   const la = useMemo(() => activities.filter(a => a.lead_id === sel).sort((a, b) => new Date(b.at) - new Date(a.at)), [activities, sel]);
@@ -285,9 +285,12 @@ export function LeadDetail({ leads, touches, activities, proposals, up, doTouch,
         if (leadKPs.length === 0) return null;
         return (
           <div style={{ marginTop: 12 }}>
-            <div style={C.section}>КП <Badge color="#534AB7" bg="#EEEDFE">{leadKPs.length}</Badge></div>
+            <div style={C.section}>КП <Badge color="#534AB7" bg="#EEEDFE">{leadKPs.length}</Badge>
+              <button style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, color: "var(--color-text-info)", fontFamily: "inherit", marginLeft: 8 }} onClick={() => setTab("proposals")}>Все КП →</button>
+            </div>
             {leadKPs.slice(0, 5).map(kp => (
-              <div key={kp.id} style={{ ...C.card, padding: "8px 12px", display: "flex", alignItems: "center", gap: 8, borderLeft: `3px solid ${kp.status === "sent" ? "#534AB7" : "#6B7280"}` }}>
+              <div key={kp.id} style={{ ...C.card, padding: "8px 12px", display: "flex", alignItems: "center", gap: 8, borderLeft: `3px solid ${kp.status === "sent" ? "#534AB7" : "#6B7280"}`, cursor: "pointer" }}
+                onClick={() => setTab("proposals")}>
                 <Badge color={kp.status === "sent" ? "#3B6D11" : "#6B7280"} bg={kp.status === "sent" ? "#EAF3DE" : "#F3F4F6"}>{kp.status === "sent" ? "отпр." : "черн."}</Badge>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 12, fontWeight: 500 }}>#{kp.ver || 1} {kp.company || lead.company_name}</div>
