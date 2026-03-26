@@ -143,22 +143,55 @@ export function LeadDetail({ leads, touches, activities, proposals, up, doTouch,
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
         {/* LEFT COLUMN: Info + SPIN + Routes */}
         <div>
-          {/* Phones & Emails compact */}
+          {/* Phones & Emails with checkboxes */}
           <div style={C.card}>
-            <div style={C.lbl}>Телефоны</div>
-            <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 6 }}>
-              {(lead.phones_raw || []).map((p, i) => <Chip key={"r"+i}>{p}</Chip>)}
-              {(lead.phones_contact || []).map((p, i) => <Chip key={"c"+i} onRemove={() => rmPhone(i)}>{p}</Chip>)}
-            </div>
+            <div style={C.lbl}>Телефоны <span style={{ color: "var(--color-text-tertiary)", fontWeight: 400 }}>— отметь рабочий</span></div>
+            {(() => {
+              const allPhones = [...new Set([...(lead.phones_raw || []), ...(lead.phones_contact || [])])].filter(Boolean);
+              const active = new Set(lead.phones_active || []);
+              const toggle = (ph) => {
+                const next = new Set(active);
+                next.has(ph) ? next.delete(ph) : next.add(ph);
+                up("leads", p => p.map(l => l.id === sel ? { ...l, phones_active: [...next] } : l));
+              };
+              return allPhones.length > 0 ? (
+                <div style={{ marginBottom: 6 }}>
+                  {allPhones.map((ph, i) => (
+                    <label key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 0", fontSize: 12, cursor: "pointer" }}>
+                      <input type="checkbox" checked={active.has(ph)} onChange={() => toggle(ph)} />
+                      <span style={{ color: active.has(ph) ? "var(--color-text-primary)" : "var(--color-text-tertiary)" }}>{ph}</span>
+                      {active.has(ph) && <span style={{ fontSize: 10, color: "#3B6D11" }}>рабочий</span>}
+                    </label>
+                  ))}
+                </div>
+              ) : <div style={{ fontSize: 11, color: "var(--color-text-tertiary)", marginBottom: 6 }}>Нет телефонов</div>;
+            })()}
             <div style={{ display: "flex", gap: 4, marginBottom: 10 }}>
               <input style={{ ...C.inp, width: 140 }} placeholder="+7..." value={newPhone} onChange={e => setNewPhone(e.target.value)} onKeyDown={e => e.key === "Enter" && addPhone()} />
               <button style={{ ...C.btn(), padding: "5px 8px" }} onClick={addPhone}>+</button>
             </div>
-            <div style={C.lbl}>Email</div>
-            <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 6 }}>
-              {(lead.emails_raw || []).map((e, i) => <Chip key={"r"+i}>{e}</Chip>)}
-              {(lead.emails_kp || []).map((e, i) => <Chip key={"c"+i} onRemove={() => rmEmail(i)}>{e}</Chip>)}
-            </div>
+
+            <div style={C.lbl}>Email <span style={{ color: "var(--color-text-tertiary)", fontWeight: 400 }}>— отметь для отправки</span></div>
+            {(() => {
+              const allEmails = [...new Set([...(lead.emails_raw || []), ...(lead.emails_kp || [])])].filter(Boolean);
+              const active = new Set(lead.emails_active || []);
+              const toggle = (em) => {
+                const next = new Set(active);
+                next.has(em) ? next.delete(em) : next.add(em);
+                up("leads", p => p.map(l => l.id === sel ? { ...l, emails_active: [...next] } : l));
+              };
+              return allEmails.length > 0 ? (
+                <div style={{ marginBottom: 6 }}>
+                  {allEmails.map((em, i) => (
+                    <label key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 0", fontSize: 12, cursor: "pointer" }}>
+                      <input type="checkbox" checked={active.has(em)} onChange={() => toggle(em)} />
+                      <span style={{ color: active.has(em) ? "var(--color-text-primary)" : "var(--color-text-tertiary)" }}>{em}</span>
+                      {active.has(em) && <span style={{ fontSize: 10, color: "#3B6D11" }}>отправка</span>}
+                    </label>
+                  ))}
+                </div>
+              ) : <div style={{ fontSize: 11, color: "var(--color-text-tertiary)", marginBottom: 6 }}>Нет email</div>;
+            })()}
             <div style={{ display: "flex", gap: 4, marginBottom: 8 }}>
               <input style={{ ...C.inp, width: 180 }} placeholder="email@..." value={newEmail} onChange={e => setNewEmail(e.target.value)} onKeyDown={e => e.key === "Enter" && addEmail()} />
               <button style={{ ...C.btn(), padding: "5px 8px" }} onClick={addEmail}>+</button>
@@ -259,7 +292,7 @@ export function LeadDetail({ leads, touches, activities, proposals, up, doTouch,
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 12, fontWeight: 500 }}>#{kp.ver || 1} {kp.company || lead.company_name}</div>
                   <div style={{ fontSize: 11, color: "var(--color-text-secondary)" }}>
-                    {kp.variants?.map(v => `${v.port}→${v.city}`).join(", ") || "—"} | {fmtFull(kp.sent || kp.created)}
+                    {kp.variants?.map(v => `${v.port || "?"}→${v.railway_dest || v.city || "?"}`).filter((v,i,a) => a.indexOf(v) === i).join(", ") || "—"} | {fmtFull(kp.sent || kp.created)}
                   </div>
                 </div>
                 {kp.emails && kp.emails.length > 0 && <span style={{ fontSize: 10, color: "var(--color-text-tertiary)" }}>→ {kp.emails.join(", ")}</span>}
@@ -295,13 +328,13 @@ export function LeadDetail({ leads, touches, activities, proposals, up, doTouch,
             const greeting = nm ? `${nm}, добрый день.` : "Добрый день.";
             const body = greeting + "\n\n" + tpl.body.replace(/\[Имя\],?\s?добрый день\.?\n?\n?/g, "").replace(/\[Имя\],?\s*/g, "").replace(/\[товар\]/g, lead.goods || "[товар]").replace(/\[город\]/g, lead.routes?.[0]?.port || "[город]").replace(/\[дата\]/g, fmtFull(today())).replace(/\[месяц\]/g, new Date().toLocaleDateString("ru-RU", { month: "long" })) + "\n\n" + EMAIL_SIGNATURE;
             const subj = tpl.subject.replace(/\[Товар\]/g, lead.goods || "[товар]").replace(/\[месяц\]/g, new Date().toLocaleDateString("ru-RU", { month: "long" }));
-            setEmailDraft({ subject: subj, body, to: "" });
+            setEmailDraft({ subject: subj, body, to: (lead.emails_active || []).join(", ") });
           }}>{k === "no_answer" ? "📵 Недозвон" : k === "followup" ? "📩 Follow-up" : "📰 Инфоповод"}</button>
         ))}
         <button style={{ ...C.btn(), fontSize: 11, padding: "5px 10px" }} onClick={() => {
           const nm = lead.greeting_name || (lead.contact_name ? lead.contact_name.split(" ")[0] : "");
           const greeting = nm ? `${nm}, добрый день.` : "Добрый день.";
-          setEmailDraft({ subject: "", body: greeting + "\n\n\n\n" + EMAIL_SIGNATURE, to: "" });
+          setEmailDraft({ subject: "", body: greeting + "\n\n\n\n" + EMAIL_SIGNATURE, to: (lead.emails_active || []).join(", ") });
         }}>✉ Своё письмо</button>
       </div>
       {emailDraft && (
