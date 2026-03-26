@@ -1,73 +1,83 @@
-# BML Sales CRM
+# BML Sales CRM v4.0.0
 
-Полнофункциональная CRM-панель для BM Logistics с отправкой КП по email.
+Модульная CRM на Vite + React для BM Logistics.
 
-## Структура
+## Что изменилось (Sprint 1 — Модуляризация)
+
+**Было:** 1 файл `index.html` — 2767 строк, Babel CDN, всё в одном месте.
+
+**Стало:** 23 модуля, средний размер 50-170 строк, Vite сборка.
+
 ```
-server.js        — Express: API (key-value SQLite) + Mailer (Nodemailer) + Static
-public/index.html — React SPA (весь фронтенд в одном файле)
+src/
+├── main.jsx                     — точка входа (7 строк)
+├── api.js                       — API слой (30)
+├── utils.js                     — утилиты (25)
+├── constants.js                 — STATUS, GRADE, стили C (62)
+├── index.css                    — глобальные стили (22)
+├── components/
+│   ├── Root.jsx                 — auth wrapper (10)
+│   ├── App.jsx                  — главный: табы, state (129)
+│   ├── LoginScreen.jsx          — логин (47)
+│   ├── Dashboard.jsx            — мой день (149)
+│   ├── LeadsList.jsx            — список лидов + импорт (245)
+│   ├── LeadDetail.jsx           — карточка лида (239)
+│   ├── TouchRow.jsx             — строка касания (38)
+│   ├── RatesTab.jsx             — ставки (121)
+│   ├── CalcTab.jsx              — калькулятор (171)
+│   ├── ProposalsTab.jsx         — КП (392)
+│   ├── PatternsTab.jsx          — паттерны (28)
+│   ├── SettingsTab.jsx          — настройки (114)
+│   └── ui.jsx                   — Badge, Chip, Combobox (67)
+├── rates/
+│   ├── parseRateExcel.js        — парсинг Excel (125)
+│   ├── calcChain.js             — калькулятор цепочки (250)
+│   └── weightSurcharge.js       — надбавка за вес (60)
+├── import/
+│   └── parseBitrix.js           — импорт Битрикс + CSV экспорт (137)
+└── kp/
+    └── buildKPEmail.js          — сборка КП письма (168)
 ```
 
-## Деплой на Railway
-
-### 1. Создай новый сервис из GitHub
-
-Если уже есть repo `Vanexel89/bml-crm` — пуш туда. Если нет — создай.
+## Разработка
 
 ```bash
-cd bml-crm
-git init
-git add .
-git commit -m "BML CRM v1"
-git remote add origin https://github.com/Vanexel89/bml-crm.git
-git push -u origin main
+npm install          # установка зависимостей
+npm run dev          # Vite dev server (порт 5173, прокси на Express :3000)
+npm run build        # сборка → public/
+npm start            # Express production сервер
 ```
 
-В Railway: New Project → Deploy from GitHub → выбери repo.
+### Workflow разработки
 
-### 2. Переменные окружения (Railway → Variables)
+1. В одном терминале: `npm start` (Express API на :3000)
+2. В другом: `npm run dev` (Vite на :5173 с HMR)
+3. Открываешь http://localhost:5173
 
+### Деплой на RUVDS
+
+```bash
+cd ~/bml-crm
+git pull
+npm install
+npm run build        # собирает фронт в public/
+pm2 restart bml-crm  # перезапуск Express
 ```
-API_KEY=твой-секретный-ключ
-SMTP_HOST=smtp.yandex.ru
-SMTP_PORT=465
-SMTP_USER=твоя-почта@домен.ru
-SMTP_PASS=пароль-приложения-яндекс
-FROM_NAME=BM Logistics
-FROM_EMAIL=твоя-почта@домен.ru
-LOGO_URL=https://ссылка-на-логотип.png
-```
-
-### 3. Persistent Volume (для БД)
-
-Railway → сервис → Settings → Volumes → Add Volume:
-- Mount path: `/data`
-- Добавь переменную: `DATA_DIR=/data`
-
-### 4. Готово
-
-Railway автоматически запустит `npm install && npm start`.
-Домен будет вида: `bml-crm-xxx.up.railway.app`
-
-## Использование
-
-1. Открой URL сервиса в браузере
-2. Введи API_KEY (тот что в переменных)
-3. CRM работает — данные на сервере, письма отправляются
 
 ## API
 
-Все запросы требуют заголовок `X-API-Key`.
+Без изменений — тот же `server.js` с SQLite KV + SMTP.
 
-- `GET /api/kv/:key` — получить значение
-- `PUT /api/kv/:key` — сохранить `{ value: "..." }`
-- `DELETE /api/kv/:key` — удалить
-- `POST /api/kv/bulk` — получить несколько ключей `{ keys: [...] }`
-- `POST /api/send` — отправить email `{ to, subject, body }`
-- `GET /api/health` — статус сервера
+## Переменные окружения
 
-## Миграция данных из артефакта
-
-Если нужно перенести данные из claude.ai артефакта:
-1. В консоли браузера на claude.ai: скопируй данные из window.storage
-2. Через API загрузи их: `PUT /api/kv/bml-v3-leads` с телом `{ value: "..." }`
+```
+API_KEY=...
+SMTP_HOST=smtp.yandex.ru
+SMTP_PORT=465
+SMTP_USER=dorofeev@bml-dv.com
+SMTP_PASS=...
+FROM_NAME=BM Logistics
+FROM_EMAIL=dorofeev@bml-dv.com
+LOGO_URL=https://...
+DATA_DIR=/data
+```

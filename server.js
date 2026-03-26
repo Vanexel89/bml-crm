@@ -85,20 +85,20 @@ function getTransporter() {
   }
   return transporter;
 }
-async function sendViaSMTP({ to, cc, subject, text, html }) {
+async function sendViaSMTP({ to, subject, text, html }) {
   const t = getTransporter();
   if (!t) throw new Error("SMTP not configured");
-  const info = await t.sendMail({ from: '"' + FROM_NAME + '" <' + FROM_EMAIL + '>', to: Array.isArray(to) ? to.join(", ") : to, cc: cc ? (Array.isArray(cc) ? cc.join(", ") : cc) : undefined, subject, text: text || "", html: html || undefined });
+  const info = await t.sendMail({ from: '"' + FROM_NAME + '" <' + FROM_EMAIL + '>', to: Array.isArray(to) ? to.join(", ") : to, subject, text: text || "", html: html || undefined });
   return { messageId: info.messageId, method: "smtp" };
 }
 
 app.post("/api/send", auth, async (req, res) => {
   try {
-    const { to, cc, subject, body: textBody, html } = req.body;
+    const { to, subject, body: textBody, html } = req.body;
     if (!to || !subject) return res.status(400).json({ error: "to and subject required" });
     const htmlBody = html || (textBody ? buildEmailHtml(textBody) : undefined);
-    const payload = { to, cc: cc || undefined, subject, text: textBody, html: htmlBody };
-    console.log("Sending to:", Array.isArray(to) ? to.join(", ") : to, cc ? "CC:" + (Array.isArray(cc) ? cc.join(", ") : cc) : "");
+    const payload = { to, subject, text: textBody, html: htmlBody };
+    console.log("Sending to:", Array.isArray(to) ? to.join(", ") : to);
     let result;
     if (RESEND_API_KEY) result = await sendViaResend(payload);
     else if (SMTP_HOST && SMTP_USER) result = await sendViaSMTP(payload);
