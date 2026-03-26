@@ -40,7 +40,7 @@ export function App({ onLogout }) {
   }, []);
 
   const mkTouches = useCallback((lid, grade, start) => {
-    const max = grade === "A" ? 7 : grade === "B" ? 2 : 0;
+    const max = grade === "A" ? 7 : grade === "B" ? 2 : 1; // C gets 1 touch (cold call)
     const ts = TOUCHES_TPL.slice(0, max).map(t => ({
       id: uid(), lead_id: lid, num: t.n, type: t.type, label: t.label, desc: t.desc, hint: t.hint || "",
       challenger: t.challenger || "", spin_focus: t.spin_focus || null,
@@ -260,7 +260,7 @@ export function App({ onLogout }) {
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
           <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: "-0.3px" }}>BML</div>
           <div style={{ fontSize: 11, color: "var(--color-text-tertiary)", fontWeight: 400 }}>Sales Panel</div>
-          <span style={{ fontSize: 9, color: "var(--color-text-tertiary)", background: "var(--color-background-secondary)", padding: "1px 6px", borderRadius: 4, marginLeft: 2 }}>v4.3.1</span>
+          <span style={{ fontSize: 9, color: "var(--color-text-tertiary)", background: "var(--color-background-secondary)", padding: "1px 6px", borderRadius: 4, marginLeft: 2 }}>v4.4.0</span>
           <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
             <button style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, color: "var(--color-text-tertiary)", fontFamily: "inherit" }} onClick={() => { if (confirm("Выйти из CRM?")) { setApiKey(""); onLogout(); } }}>Выйти ↗</button>
           </div>

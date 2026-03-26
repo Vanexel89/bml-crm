@@ -3,6 +3,7 @@ import { Badge, Chip, Combobox } from './ui.jsx';
 import { TouchRow } from './TouchRow.jsx';
 import { C, STATUS, GRADE, OBJECTION_TREE, OBJECTION_SCRIPTS, SPIN_QUESTIONS, CHALLENGER_INSIGHTS, OUTCOMES, EMAIL_TEMPLATES, EMAIL_SIGNATURE } from '../constants.js';
 import { uid, today, fmt, fmtFull, addDays, calcGrade } from '../utils.js';
+import { apiCall } from '../api.js';
 
 export function LeadDetail({ leads, touches, activities, up, doTouch, mkTouches, sel, setSel, freight, railway, goToKPFromLead }) {
   const lead = leads.find(l => l.id === sel);
@@ -18,6 +19,8 @@ export function LeadDetail({ leads, touches, activities, up, doTouch, mkTouches,
   const [selectedRoutes, setSelectedRoutes] = useState(new Set());
   const [spinOpen, setSpinOpen] = useState(null); // which SPIN tab is open
   const [objOpen, setObjOpen] = useState(false); // objection tree open
+  const [emailDraft, setEmailDraft] = useState(null); // { subject, body, to }
+  const [emailSending, setEmailSending] = useState(false);
 
   const toggleRoute = (i) => setSelectedRoutes(prev => { const n = new Set(prev); n.has(i) ? n.delete(i) : n.add(i); return n; });
   const selectAllRoutes = () => { if (selectedRoutes.size === (lead?.routes||[]).length) setSelectedRoutes(new Set()); else setSelectedRoutes(new Set((lead?.routes||[]).map((_,i) => i))); };
@@ -232,46 +235,80 @@ export function LeadDetail({ leads, touches, activities, up, doTouch, mkTouches,
       <div style={{ ...C.section, marginTop: 14 }}>Касания</div>
       {lt.length === 0 ? (
         <div style={{ ...C.card, textAlign: "center", padding: 14, color: "var(--color-text-tertiary)" }}>
-          Нет касаний. {lead.grade === "C" && "Грейд C."}{" "}
-          <button style={{ ...C.btn(), marginLeft: 6 }} onClick={() => { const g = calcGrade(lead); up("leads", p => p.map(l => l.id === sel ? { ...l, grade: g } : l)); if (g !== "C") mkTouches(sel, g, today()); }}>Запустить</button>
+          Нет касаний.{" "}
+          <button style={{ ...C.btn(), marginLeft: 6 }} onClick={() => { mkTouches(sel, lead.grade || "C", today()); }}>Запустить</button>
         </div>
       ) : lt.map(t => <TouchRow key={t.id} t={t} doTouch={doTouch} />)}
 
-      {/* Email Templates */}
-      <div style={{ ...C.section, marginTop: 14 }}>Шаблоны писем</div>
-      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-        {Object.entries(EMAIL_TEMPLATES).map(([k, tpl]) => (
-          <button key={k} style={{ ...C.btn(), fontSize: 11, padding: "5px 10px" }} onClick={() => {
-            const nm = lead.contact_name ? lead.contact_name.split(" ")[0] : "[Имя]";
-            const f = tpl.body.replace(/\[Имя\]/g,nm).replace(/\[товар\]/g,lead.goods||"[товар]").replace(/\[город\]/g,lead.routes?.[0]?.port||"[город]").replace(/\[дата\]/g,fmtFull(today())).replace(/\[месяц\]/g,new Date().toLocaleDateString("ru-RU",{month:"long"}));
-            const s = tpl.subject.replace(/\[Товар\]/g,lead.goods||"[товар]").replace(/\[месяц\]/g,new Date().toLocaleDateString("ru-RU",{month:"long"}));
-            navigator.clipboard?.writeText(s+"\n\n"+f+"\n\n"+EMAIL_SIGNATURE); alert("Скопировано: "+s);
-          }}>{k === "no_answer" ? "📵 Недозвон" : k === "followup" ? "📩 Follow-up" : "📰 Инфоповод"}</button>
-        ))}
-      </div>
-
-      {/* Frozen info */}
-      {lead.status === "frozen" && (<div style={{ ...C.card, marginTop: 10, background: "#F1EFE8", border: "none" }}>
-        <div style={{ fontSize: 12, color: "#888780" }}>❄️ {lead.frozen_reason || "Заморожен"}</div>
-        {lead.frozen_date && <div style={{ fontSize: 11, color: "#888780", marginTop: 2 }}>Разморозка: {fmtFull(addDays(lead.frozen_date, 30))} <button style={{ ...C.btn(), marginLeft: 8, fontSize: 11 }} onClick={() => up("leads", p => p.map(l => l.id === sel ? { ...l, status: "new", unfrozen_date: today() } : l))}>🔥 Разморозить</button></div>}
-      </div>)}
-
-      {/* Notes & History */}
-      <div style={{ ...C.section, marginTop: 14 }}>Заметки</div>
+      {/* Notes & History — moved up for visibility */}
+      <div style={{ ...C.section, marginTop: 14 }}>Заметки и история</div>
       <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
         <input style={{ ...C.inp, flex: 1 }} placeholder="Заметка после разговора..." value={noteText} onChange={e => setNoteText(e.target.value)} onKeyDown={e => e.key === "Enter" && addNote()} />
         <button style={C.btn(true)} onClick={addNote}>+</button>
       </div>
-      {la.map(a => (
+      {la.slice(0, 10).map(a => (
         <div key={a.id} style={{ padding: "7px 0", borderBottom: "0.5px solid var(--color-border-tertiary)", fontSize: 12 }}>
           <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-            <Badge color={a.type === "touch" ? "#534AB7" : "#6B7280"} bg={a.type === "touch" ? "#EEEDFE" : "#F3F4F6"}>{a.type === "touch" ? "касание" : "заметка"}</Badge>
+            <Badge color={a.type === "touch" ? "#534AB7" : a.type === "dial_attempt" ? "#6B7280" : "#6B7280"} bg={a.type === "touch" ? "#EEEDFE" : "#F3F4F6"}>{a.type === "touch" ? "касание" : a.type === "dial_attempt" ? "📵" : "заметка"}</Badge>
             {a.outcome && <Badge color={OUTCOMES[a.outcome]?.c || "#6B7280"} bg={OUTCOMES[a.outcome]?.bg || "#F3F4F6"}>{OUTCOMES[a.outcome]?.l || a.outcome}</Badge>}
             <span style={{ fontSize: 11, color: "var(--color-text-tertiary)", marginLeft: "auto" }}>{fmtFull(a.at)}</span>
           </div>
           <div style={{ color: "var(--color-text-secondary)", marginTop: 2 }}>{a.content}</div>
         </div>
       ))}
+      {la.length > 10 && <div style={{ fontSize: 11, color: "var(--color-text-tertiary)", padding: 4 }}>+ ещё {la.length - 10} записей</div>}
+
+      {/* Email Composer */}
+      <div style={{ ...C.section, marginTop: 14 }}>Написать письмо</div>
+      <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 8 }}>
+        {Object.entries(EMAIL_TEMPLATES).map(([k, tpl]) => (
+          <button key={k} style={{ ...C.btn(), fontSize: 11, padding: "5px 10px" }} onClick={() => {
+            const nm = lead.contact_name ? lead.contact_name.split(" ")[0] : "";
+            const greeting = nm ? `${nm}, добрый день.` : "Добрый день.";
+            const body = greeting + "\n\n" + tpl.body.replace(/\[Имя\],?\s*/g, "").replace(/\[товар\]/g, lead.goods || "[товар]").replace(/\[город\]/g, lead.routes?.[0]?.port || "[город]").replace(/\[дата\]/g, fmtFull(today())).replace(/\[месяц\]/g, new Date().toLocaleDateString("ru-RU", { month: "long" })) + "\n\n" + EMAIL_SIGNATURE;
+            const subj = tpl.subject.replace(/\[Товар\]/g, lead.goods || "[товар]").replace(/\[месяц\]/g, new Date().toLocaleDateString("ru-RU", { month: "long" }));
+            const emails = [...(lead.emails_kp || []), ...(lead.emails_raw || [])].filter((v, i, a) => a.indexOf(v) === i);
+            setEmailDraft({ subject: subj, body, to: emails.join(", ") });
+          }}>{k === "no_answer" ? "📵 Недозвон" : k === "followup" ? "📩 Follow-up" : "📰 Инфоповод"}</button>
+        ))}
+        <button style={{ ...C.btn(), fontSize: 11, padding: "5px 10px" }} onClick={() => {
+          const nm = lead.contact_name ? lead.contact_name.split(" ")[0] : "";
+          const greeting = nm ? `${nm}, добрый день.` : "Добрый день.";
+          const emails = [...(lead.emails_kp || []), ...(lead.emails_raw || [])].filter((v, i, a) => a.indexOf(v) === i);
+          setEmailDraft({ subject: "", body: greeting + "\n\n\n\n" + EMAIL_SIGNATURE, to: emails.join(", ") });
+        }}>✉ Своё письмо</button>
+      </div>
+      {emailDraft && (
+        <div style={{ ...C.card, borderColor: "var(--color-border-info)" }}>
+          <div style={C.g3}>
+            <div style={{ gridColumn: "1 / -1" }}><div style={C.lbl}>Кому</div><input style={C.inp} value={emailDraft.to} onChange={e => setEmailDraft(p => ({ ...p, to: e.target.value }))} placeholder="email@..." /></div>
+            <div style={{ gridColumn: "1 / -1" }}><div style={C.lbl}>Тема</div><input style={C.inp} value={emailDraft.subject} onChange={e => setEmailDraft(p => ({ ...p, subject: e.target.value }))} /></div>
+            <div style={{ gridColumn: "1 / -1" }}><div style={C.lbl}>Письмо</div><textarea style={{ ...C.inp, height: 140, resize: "vertical", lineHeight: 1.5 }} value={emailDraft.body} onChange={e => setEmailDraft(p => ({ ...p, body: e.target.value }))} /></div>
+          </div>
+          <div style={{ fontSize: 11, color: "var(--color-text-tertiary)", marginTop: 6 }}>От: Dorofeev Vitaliy / BML DV</div>
+          <div style={{ display: "flex", gap: 6, marginTop: 8, justifyContent: "flex-end" }}>
+            <button style={C.btn()} onClick={() => setEmailDraft(null)}>Отмена</button>
+            <button style={C.btn(true)} disabled={emailSending || !emailDraft.to || !emailDraft.subject} onClick={async () => {
+              setEmailSending(true);
+              try {
+                const res = await apiCall("POST", "/api/send", { to: emailDraft.to.split(",").map(s => s.trim()).filter(Boolean), subject: emailDraft.subject, body: emailDraft.body });
+                if (res.ok) {
+                  up("activities", p => [...p, { id: uid(), lead_id: sel, type: "note", content: `Email: ${emailDraft.subject} → ${emailDraft.to}`, at: new Date().toISOString() }]);
+                  setEmailDraft(null);
+                  alert("Отправлено!");
+                } else { alert("Ошибка: " + (res.error || "неизвестная")); }
+              } catch (err) { alert("Ошибка сети: " + err.message); }
+              setEmailSending(false);
+            }}>{emailSending ? "Отправка..." : "Отправить"}</button>
+          </div>
+        </div>
+      )}
+
+      {/* Frozen info */}
+      {lead.status === "frozen" && (<div style={{ ...C.card, marginTop: 10, background: "#F1EFE8", border: "none" }}>
+        <div style={{ fontSize: 12, color: "#888780" }}>❄️ {lead.frozen_reason || "Заморожен"}</div>
+        {lead.frozen_date && <div style={{ fontSize: 11, color: "#888780", marginTop: 2 }}>Разморозка: {fmtFull(addDays(lead.frozen_date, 30))} <button style={{ ...C.btn(), marginLeft: 8, fontSize: 11 }} onClick={() => up("leads", p => p.map(l => l.id === sel ? { ...l, status: "new", unfrozen_date: today() } : l))}>🔥 Разморозить</button></div>}
+      </div>)}
     </div>
   );
 }
