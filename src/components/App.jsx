@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { load, save, setApiKey } from '../api.js';
-import { KEYS, TOUCHES_TPL, OBJECTION_TREE, LOGO_URL, C } from '../constants.js';
+import { KEYS, TOUCHES_TPL, REACTIVATION_TPL, OBJECTION_TREE, RATE_CHECK_INTERVAL_DAYS, LOGO_URL, C } from '../constants.js';
 import { uid, today, addDays, calcGrade } from '../utils.js';
 import { Dashboard } from './Dashboard.jsx';
 import { LeadsList } from './LeadsList.jsx';
@@ -49,11 +49,12 @@ export function App({ onLogout }) {
     up("touches", p => [...p, ...ts]);
   }, [up]);
 
-  // ─── NEW doTouch — Sales Navigator logic ───
+  // ─── doTouch — Sales Navigator logic v2 (adaptive) ───
   const doTouch = useCallback((tid, outcome, note, extra = {}) => {
     const ref = data.touches.find(t => t.id === tid);
     if (!ref) return;
     const lid = ref.lead_id;
+    const lead = data.leads.find(l => l.id === lid);
     const d = today();
 
     // 1. Mark touch as done
@@ -62,26 +63,40 @@ export function App({ onLogout }) {
     // 2. Log activity
     up("activities", p => [...p, { id: uid(), lead_id: lid, type: "touch", content: `${ref.label}: ${note}`, outcome, at: new Date().toISOString() }]);
 
+    // Helper: max touch num for this lead
+    const maxNum = () => data.touches.filter(t => t.lead_id === lid).reduce((m, t) => Math.max(m, t.num || 0), 0);
+
+    // Helper: check if lead has email and routes
+    const hasEmail = lead && ((lead.emails_kp || []).length > 0 || (lead.emails_raw || []).length > 0);
+    const hasRoutes = lead && (lead.routes || []).length > 0;
+    const canSendKP = hasEmail && hasRoutes;
+
     // 3. Handle outcome-specific logic
     if (outcome === "interested") {
-      // Cancel remaining touches, advance status
       up("touches", p => p.map(t => t.lead_id === lid && t.status === "scheduled" && t.id !== tid ? { ...t, status: "cancelled" } : t));
       up("leads", p => p.map(l => l.id === lid ? { ...l, status: "negotiation" } : l));
     }
 
+    else if (outcome === "sent") {
+      // Proposal/email sent — just advance status if needed, no outcome question
+      if (lead && lead.status === "qualified") {
+        up("leads", p => p.map(l => l.id === lid ? { ...l, status: "proposal_sent" } : l));
+      }
+    }
+
     else if (outcome === "objection" && extra.objectionKey) {
-      // Save objection on lead
       up("leads", p => p.map(l => l.id === lid ? { ...l, objections: extra.objectionKey, last_objection: extra.objectionKey, last_objection_date: d } : l));
-      // Create auto-task from objection tree
       const obj = OBJECTION_TREE[extra.objectionKey];
       if (obj && obj.nextAction) {
         const na = obj.nextAction;
-        const maxNum = data.touches.filter(t => t.lead_id === lid).reduce((m, t) => Math.max(m, t.num || 0), 0);
+        // If next action is proposal but can't send — switch to call
+        const actualType = (na.type === "proposal" && !canSendKP) ? "call" : na.type;
+        const actualLabel = (na.type === "proposal" && !canSendKP) ? "Узнать email + маршрут" : na.label;
         up("touches", p => [...p, {
-          id: uid(), lead_id: lid, num: maxNum + 0.5, // insert between existing
-          type: na.type, label: na.label,
+          id: uid(), lead_id: lid, num: maxNum() + 0.5,
+          type: actualType, label: actualLabel,
           desc: `Авто: после «${extra.objectionKey}»`,
-          hint: obj.laer.respond,
+          hint: (na.type === "proposal" && !canSendKP) ? "Узнай email и маршрут чтобы отправить расчёт." : obj.laer.respond,
           challenger: "", spin_focus: null,
           date: addDays(d, na.days), done: null, status: "scheduled", outcome: null, note: "",
         }]);
@@ -89,10 +104,8 @@ export function App({ onLogout }) {
     }
 
     else if (outcome === "callback" && extra.callbackDays) {
-      // Create callback task
-      const maxNum = data.touches.filter(t => t.lead_id === lid).reduce((m, t) => Math.max(m, t.num || 0), 0);
       up("touches", p => [...p, {
-        id: uid(), lead_id: lid, num: maxNum + 0.5,
+        id: uid(), lead_id: lid, num: maxNum() + 0.5,
         type: "call", label: "Перезвон",
         desc: note || "Клиент просил перезвонить",
         hint: "Перезвони как договаривались. Напомни о чём говорили.",
@@ -102,10 +115,24 @@ export function App({ onLogout }) {
     }
 
     else if (outcome === "no_answer") {
-      // Auto-freeze after last touch without answer
       const allTouches = data.touches.filter(t => t.lead_id === lid);
-      const maxNum = allTouches.reduce((m, t) => Math.max(m, t.num || 0), 0);
       const scheduled = allTouches.filter(t => t.status === "scheduled" && t.id !== tid);
+
+      // ADAPTIVE: if next scheduled touch is proposal/email but no email/routes — replace with call
+      if (scheduled.length > 0) {
+        const next = scheduled.sort((a, b) => (a.num || 0) - (b.num || 0))[0];
+        if ((next.type === "proposal" || next.type === "email") && !canSendKP) {
+          up("touches", p => p.map(t => t.id === next.id ? {
+            ...t,
+            type: "call",
+            label: next.type === "proposal" ? "Повторный звонок (вместо КП)" : "Повторный звонок (вместо email)",
+            desc: "Нет email/маршрута — сначала дозвонись",
+            hint: "Цель: узнать email, порт, город доставки. Без этих данных КП отправить нельзя.",
+          } : t));
+        }
+      }
+
+      // Auto-freeze after last touch
       if (scheduled.length === 0 && ref.num >= 6) {
         up("leads", p => p.map(l => l.id === lid ? { ...l, status: "frozen", frozen_reason: `${ref.num} касаний без ответа`, frozen_date: d } : l));
       }
@@ -114,7 +141,6 @@ export function App({ onLogout }) {
     else if (outcome === "rejected") {
       const action = extra.rejectAction || "frozen";
       const reason = extra.rejectReason || "unknown";
-      // Cancel remaining touches
       up("touches", p => p.map(t => t.lead_id === lid && t.status === "scheduled" && t.id !== tid ? { ...t, status: "cancelled" } : t));
       if (action === "lost") {
         up("leads", p => p.map(l => l.id === lid ? { ...l, status: "lost", lost_reason: reason, lost_date: d } : l));
@@ -123,17 +149,65 @@ export function App({ onLogout }) {
       }
     }
 
-  }, [data.touches, up]);
+  }, [data.touches, data.leads, up]);
 
-  // Auto-unfreeze after 30 days
+  // ─── Auto-unfreeze after 30 days → REACTIVATION touches (not standard 7) ───
   useEffect(() => {
     if (!ready) return;
     const d = today();
     data.leads.forEach(l => {
-      if (l.status === "frozen" && l.frozen_date && addDays(l.frozen_date, 30) <= d)
+      if (l.status === "frozen" && l.frozen_date && addDays(l.frozen_date, 30) <= d) {
+        // Unfreeze
         up("leads", p => p.map(x => x.id === l.id ? { ...x, status: "new", unfrozen_date: d, frozen_reason: (x.frozen_reason||"") + " → разморожен " + d } : x));
+        // Create REACTIVATION touches (3 instead of 7)
+        const rTouches = REACTIVATION_TPL.map(t => ({
+          id: uid(), lead_id: l.id, num: 100 + t.n, // high num to not conflict
+          type: t.type, label: t.label, desc: t.desc, hint: t.hint || "",
+          challenger: t.challenger || "", spin_focus: t.spin_focus || null,
+          date: addDays(d, t.day), done: null, status: "scheduled", outcome: null, note: "",
+        }));
+        up("touches", p => [...p, ...rTouches]);
+      }
     });
   }, [ready]);
+
+  // ─── Auto-tasks when rates change (every RATE_CHECK_INTERVAL_DAYS) ───
+  useEffect(() => {
+    if (!ready || !data.freight || data.freight.length === 0) return;
+    const d = today();
+    // Check leads with proposals where rates might have changed
+    const activeStatuses = ["proposal_sent", "negotiation", "frozen"];
+    data.leads.forEach(l => {
+      if (!activeStatuses.includes(l.status)) return;
+      if (!l.routes || l.routes.length === 0) return;
+      // Check if we already created a rate-update task recently
+      const recentRateTask = data.touches.some(t =>
+        t.lead_id === l.id && t.label === "Обновить ставку" && t.status === "scheduled"
+      );
+      if (recentRateTask) return;
+      // Check last rate-update task done date
+      const lastRateTask = data.touches
+        .filter(t => t.lead_id === l.id && t.label === "Обновить ставку" && t.done)
+        .sort((a, b) => b.done.localeCompare(a.done))[0];
+      if (lastRateTask && addDays(lastRateTask.done, RATE_CHECK_INTERVAL_DAYS) > d) return;
+      // Check if last KP was sent > RATE_CHECK_INTERVAL_DAYS ago
+      const lastKP = data.proposals
+        .filter(p => p.lead_id === l.id && p.status === "sent")
+        .sort((a, b) => (b.sent || b.created || "").localeCompare(a.sent || a.created || ""))[0];
+      if (!lastKP) return;
+      const kpDate = (lastKP.sent || lastKP.created || "").slice(0, 10);
+      if (kpDate && addDays(kpDate, RATE_CHECK_INTERVAL_DAYS) <= d) {
+        up("touches", p => [...p, {
+          id: uid(), lead_id: l.id, num: 200,
+          type: "proposal", label: "Обновить ставку",
+          desc: "Прошло " + RATE_CHECK_INTERVAL_DAYS + " дней с последнего КП. Проверь ставки.",
+          hint: "Пересчитай ставку. Если изменилась — отправь обновлённый расчёт с пометкой «ставки обновились».",
+          challenger: "", spin_focus: null,
+          date: d, done: null, status: "scheduled", outcome: null, note: "",
+        }]);
+      }
+    });
+  }, [ready, data.freight]);
 
   const goToKP = (calcResult) => { setKpFromCalc(calcResult); setTab("proposals"); };
   const goToKPFromLead = ({ leadId, routes }) => { setKpFromCalc({ fromLead: true, leadId, routes }); setTab("proposals"); };
@@ -155,7 +229,7 @@ export function App({ onLogout }) {
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
           <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: "-0.3px" }}>BML</div>
           <div style={{ fontSize: 11, color: "var(--color-text-tertiary)", fontWeight: 400 }}>Sales Panel</div>
-          <span style={{ fontSize: 9, color: "var(--color-text-tertiary)", background: "var(--color-background-secondary)", padding: "1px 6px", borderRadius: 4, marginLeft: 2 }}>v4.2.0</span>
+          <span style={{ fontSize: 9, color: "var(--color-text-tertiary)", background: "var(--color-background-secondary)", padding: "1px 6px", borderRadius: 4, marginLeft: 2 }}>v4.3.0</span>
           <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
             <button style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, color: "var(--color-text-tertiary)", fontFamily: "inherit" }} onClick={() => { if (confirm("Выйти из CRM?")) { setApiKey(""); onLogout(); } }}>Выйти ↗</button>
           </div>

@@ -95,25 +95,53 @@ export function TouchRow({ t, doTouch }) {
           {/* Phase: outcome selection */}
           {phase === "outcome" && (
             <div>
-              <div style={{ fontSize: 11, color: "var(--color-text-secondary)", marginBottom: 6 }}>Результат касания:</div>
-              <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 8 }}>
-                {Object.entries(OUTCOMES).map(([k, v]) => (
-                  <button key={k} style={{ ...C.btn(), fontSize: 11, padding: "5px 10px", borderColor: v.c, color: v.c }}
-                    onClick={() => {
-                      if (k === "interested") submit("interested");
-                      else if (k === "objection") setPhase("objection");
-                      else if (k === "callback") setPhase("callback");
-                      else if (k === "no_answer") submit("no_answer");
-                      else if (k === "rejected") setPhase("reject");
-                    }}>
-                    {v.icon} {v.l}
-                  </button>
-                ))}
-              </div>
-              <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-                <input style={{ ...C.inp, flex: 1, fontSize: 11, padding: "4px 8px" }} value={note} onChange={e => setNote(e.target.value)} placeholder="Заметка (необязательно)" />
-                <button style={{ ...C.btn(), fontSize: 11, padding: "4px 8px" }} onClick={reset}>Отмена</button>
-              </div>
+              {(t.type === "proposal" || t.type === "email") ? (
+                <>
+                  <div style={{ fontSize: 11, color: "var(--color-text-secondary)", marginBottom: 6 }}>
+                    {t.type === "proposal" ? "КП / расчёт:" : "Email:"}
+                  </div>
+                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 8 }}>
+                    <button style={{ ...C.btn(true), fontSize: 11, padding: "5px 12px", background: "#534AB7" }}
+                      onClick={() => submit("sent", t.type === "proposal" ? "КП отправлено" : "Email отправлен")}>
+                      📨 Отправлено
+                    </button>
+                    <button style={{ ...C.btn(), fontSize: 11, padding: "5px 10px", borderColor: "#888780", color: "#888780" }}
+                      onClick={() => submit("no_answer", "Не отправлено — нет данных")}>
+                      — Не удалось (нет email/маршрута)
+                    </button>
+                    <button style={{ ...C.btn(), fontSize: 11, padding: "5px 10px", borderColor: "#185FA5", color: "#185FA5" }}
+                      onClick={() => setPhase("callback")}>
+                      ↻ Отложить
+                    </button>
+                  </div>
+                  <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                    <input style={{ ...C.inp, flex: 1, fontSize: 11, padding: "4px 8px" }} value={note} onChange={e => setNote(e.target.value)} placeholder="Заметка (необязательно)" />
+                    <button style={{ ...C.btn(), fontSize: 11, padding: "4px 8px" }} onClick={reset}>Отмена</button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ fontSize: 11, color: "var(--color-text-secondary)", marginBottom: 6 }}>Результат касания:</div>
+                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 8 }}>
+                    {Object.entries(OUTCOMES).filter(([k]) => k !== "sent").map(([k, v]) => (
+                      <button key={k} style={{ ...C.btn(), fontSize: 11, padding: "5px 10px", borderColor: v.c, color: v.c }}
+                        onClick={() => {
+                          if (k === "interested") submit("interested");
+                          else if (k === "objection") setPhase("objection");
+                          else if (k === "callback") setPhase("callback");
+                          else if (k === "no_answer") submit("no_answer");
+                          else if (k === "rejected") setPhase("reject");
+                        }}>
+                        {v.icon} {v.l}
+                      </button>
+                    ))}
+                  </div>
+                  <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                    <input style={{ ...C.inp, flex: 1, fontSize: 11, padding: "4px 8px" }} value={note} onChange={e => setNote(e.target.value)} placeholder="Заметка (необязательно)" />
+                    <button style={{ ...C.btn(), fontSize: 11, padding: "4px 8px" }} onClick={reset}>Отмена</button>
+                  </div>
+                </>
+              )}
             </div>
           )}
 

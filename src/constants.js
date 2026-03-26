@@ -9,6 +9,7 @@ export const OUTCOMES = {
   interested:  { l: "Заинтересован", c: "#3B6D11", bg: "#EAF3DE", icon: "✓" },
   objection:   { l: "Возражение",    c: "#854F0B", bg: "#FAEEDA", icon: "⚡" },
   callback:    { l: "Перезвонить",   c: "#185FA5", bg: "#E6F1FB", icon: "↻" },
+  sent:        { l: "Отправлено",    c: "#534AB7", bg: "#EEEDFE", icon: "📨" },
   no_answer:   { l: "Нет ответа",    c: "#888780", bg: "#F1EFE8", icon: "—" },
   rejected:    { l: "Отказ",         c: "#A32D2D", bg: "#FCEBEB", icon: "✗" },
 };
@@ -261,6 +262,28 @@ export const TOUCHES_TPL = [
     spin_focus: null,
   },
 ];
+
+// ─── REACTIVATION — касания при разморозке (вместо стандартных 7) ───
+export const REACTIVATION_TPL = [
+  { n: 1, type: "call", label: "Реактивация", day: 0, desc: "Новый инфоповод",
+    hint: "«[Имя], мы общались месяц назад. С тех пор ставки изменились — хочу обновить расчёт. Актуально?»",
+    challenger: "Приходи с конкретным изменением: «Ставка на ваш маршрут упала на $X.»",
+    spin_focus: "need_payoff",
+  },
+  { n: 2, type: "proposal", label: "Обновлённый расчёт", day: 1, desc: "Актуальная ставка",
+    hint: "Отправь обновлённый расчёт с пометкой что ставки изменились.",
+    challenger: "Покажи разницу: «Было $X, стало $Y — экономия Z% на контейнер.»",
+    spin_focus: null,
+  },
+  { n: 3, type: "call", label: "Финальный звонок", day: 7, desc: "Последняя попытка",
+    hint: "«Отправлял обновлённый расчёт. Если не актуально — не беспокою. Если да — один пробный.»",
+    challenger: "«За месяц что не общались — что-то изменилось в логистике?»",
+    spin_focus: "problem",
+  },
+];
+
+// ─── RATE CHECK — интервал автопроверки ставок (дни) ───
+export const RATE_CHECK_INTERVAL_DAYS = 14;
 
 // ─── AUTO-TASK RULES — что создаёт система после каждого outcome ───
 export const AUTO_TASK_RULES = {
