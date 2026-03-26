@@ -63,7 +63,7 @@ export function LeadDetail({ leads, touches, activities, up, doTouch, mkTouches,
             </div>
           </div>
           <div style={{ display: "flex", gap: 4 }}>
-            <button style={C.btn()} onClick={() => { setEf({ volume_monthly: lead.volume_monthly || "", routes_match: lead.routes_match || "unknown", payment_terms: lead.payment_terms || "unknown" }); setEditing(true); }}>Ред.</button>
+            <button style={C.btn()} onClick={() => { setEf({ contact_name: lead.contact_name || "", volume_monthly: lead.volume_monthly || "", routes_match: lead.routes_match || "unknown", payment_terms: lead.payment_terms || "unknown", goods: lead.goods || "", website: lead.website || "" }); setEditing(true); }}>Ред.</button>
             <select style={{ ...C.sel, fontSize: 11 }} value={lead.status} onChange={e => up("leads", p => p.map(l => l.id === sel ? { ...l, status: e.target.value } : l))}>
               {Object.entries(STATUS).map(([k, v]) => <option key={k} value={k}>{v.l}</option>)}
             </select>
@@ -116,14 +116,17 @@ export function LeadDetail({ leads, touches, activities, up, doTouch, mkTouches,
       {/* Edit form */}
       {editing && (
         <div style={{ ...C.card, background: "var(--color-background-secondary)", border: "none" }}>
-          <div style={C.g3}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div><div style={C.lbl}>Контакт (ФИО / обращение)</div><input style={C.inp} value={ef.contact_name} onChange={e => setEf(p => ({ ...p, contact_name: e.target.value }))} placeholder="Димитрий" /></div>
+            <div><div style={C.lbl}>Товар / груз</div><input style={C.inp} value={ef.goods} onChange={e => setEf(p => ({ ...p, goods: e.target.value }))} placeholder="оксиды, химия" /></div>
             <div><div style={C.lbl}>Конт/мес</div><input style={C.inp} type="number" value={ef.volume_monthly} onChange={e => setEf(p => ({ ...p, volume_monthly: e.target.value }))} /></div>
+            <div><div style={C.lbl}>Сайт</div><input style={C.inp} value={ef.website} onChange={e => setEf(p => ({ ...p, website: e.target.value }))} placeholder="company.ru" /></div>
             <div><div style={C.lbl}>Направления</div><select style={{ ...C.sel, width: "100%" }} value={ef.routes_match} onChange={e => setEf(p => ({ ...p, routes_match: e.target.value }))}><option value="yes">Да</option><option value="partial">Частично</option><option value="no">Нет</option><option value="unknown">Не знаю</option></select></div>
             <div><div style={C.lbl}>Оплата</div><select style={{ ...C.sel, width: "100%" }} value={ef.payment_terms} onChange={e => setEf(p => ({ ...p, payment_terms: e.target.value }))}><option value="prepay">Предоплата</option><option value="standard">Стандарт</option><option value="deferred">Отсрочка</option><option value="unknown">Не знаю</option></select></div>
           </div>
           <div style={{ display: "flex", gap: 6, marginTop: 8, justifyContent: "flex-end" }}>
             <button style={C.btn()} onClick={() => setEditing(false)}>Отмена</button>
-            <button style={C.btn(true)} onClick={() => { const g = calcGrade({ volume_monthly: Number(ef.volume_monthly), routes_match: ef.routes_match, payment_terms: ef.payment_terms }); up("leads", p => p.map(l => l.id === sel ? { ...l, ...ef, volume_monthly: Number(ef.volume_monthly) || l.volume_monthly, grade: g } : l)); setEditing(false); }}>Сохранить</button>
+            <button style={C.btn(true)} onClick={() => { const g = calcGrade({ volume_monthly: Number(ef.volume_monthly), routes_match: ef.routes_match, payment_terms: ef.payment_terms }); up("leads", p => p.map(l => l.id === sel ? { ...l, contact_name: ef.contact_name, goods: ef.goods, website: ef.website, volume_monthly: Number(ef.volume_monthly) || l.volume_monthly, routes_match: ef.routes_match, payment_terms: ef.payment_terms, grade: g } : l)); setEditing(false); }}>Сохранить</button>
           </div>
         </div>
       )}
@@ -265,27 +268,25 @@ export function LeadDetail({ leads, touches, activities, up, doTouch, mkTouches,
           <button key={k} style={{ ...C.btn(), fontSize: 11, padding: "5px 10px" }} onClick={() => {
             const nm = lead.contact_name ? lead.contact_name.split(" ")[0] : "";
             const greeting = nm ? `${nm}, добрый день.` : "Добрый день.";
-            const body = greeting + "\n\n" + tpl.body.replace(/\[Имя\],?\s*/g, "").replace(/\[товар\]/g, lead.goods || "[товар]").replace(/\[город\]/g, lead.routes?.[0]?.port || "[город]").replace(/\[дата\]/g, fmtFull(today())).replace(/\[месяц\]/g, new Date().toLocaleDateString("ru-RU", { month: "long" })) + "\n\n" + EMAIL_SIGNATURE;
+            const body = greeting + "\n\n" + tpl.body.replace(/\[Имя\],?\s?добрый день\.?\n?\n?/g, "").replace(/\[Имя\],?\s*/g, "").replace(/\[товар\]/g, lead.goods || "[товар]").replace(/\[город\]/g, lead.routes?.[0]?.port || "[город]").replace(/\[дата\]/g, fmtFull(today())).replace(/\[месяц\]/g, new Date().toLocaleDateString("ru-RU", { month: "long" })) + "\n\n" + EMAIL_SIGNATURE;
             const subj = tpl.subject.replace(/\[Товар\]/g, lead.goods || "[товар]").replace(/\[месяц\]/g, new Date().toLocaleDateString("ru-RU", { month: "long" }));
-            const emails = [...(lead.emails_kp || []), ...(lead.emails_raw || [])].filter((v, i, a) => a.indexOf(v) === i);
-            setEmailDraft({ subject: subj, body, to: emails.join(", ") });
+            setEmailDraft({ subject: subj, body, to: "" });
           }}>{k === "no_answer" ? "📵 Недозвон" : k === "followup" ? "📩 Follow-up" : "📰 Инфоповод"}</button>
         ))}
         <button style={{ ...C.btn(), fontSize: 11, padding: "5px 10px" }} onClick={() => {
           const nm = lead.contact_name ? lead.contact_name.split(" ")[0] : "";
           const greeting = nm ? `${nm}, добрый день.` : "Добрый день.";
-          const emails = [...(lead.emails_kp || []), ...(lead.emails_raw || [])].filter((v, i, a) => a.indexOf(v) === i);
-          setEmailDraft({ subject: "", body: greeting + "\n\n\n\n" + EMAIL_SIGNATURE, to: emails.join(", ") });
+          setEmailDraft({ subject: "", body: greeting + "\n\n\n\n" + EMAIL_SIGNATURE, to: "" });
         }}>✉ Своё письмо</button>
       </div>
       {emailDraft && (
         <div style={{ ...C.card, borderColor: "var(--color-border-info)" }}>
-          <div style={C.g3}>
-            <div style={{ gridColumn: "1 / -1" }}><div style={C.lbl}>Кому</div><input style={C.inp} value={emailDraft.to} onChange={e => setEmailDraft(p => ({ ...p, to: e.target.value }))} placeholder="email@..." /></div>
-            <div style={{ gridColumn: "1 / -1" }}><div style={C.lbl}>Тема</div><input style={C.inp} value={emailDraft.subject} onChange={e => setEmailDraft(p => ({ ...p, subject: e.target.value }))} /></div>
-            <div style={{ gridColumn: "1 / -1" }}><div style={C.lbl}>Письмо</div><textarea style={{ ...C.inp, height: 140, resize: "vertical", lineHeight: 1.5 }} value={emailDraft.body} onChange={e => setEmailDraft(p => ({ ...p, body: e.target.value }))} /></div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 8 }}>
+            <div><div style={C.lbl}>Кому</div><input style={C.inp} value={emailDraft.to} onChange={e => setEmailDraft(p => ({ ...p, to: e.target.value }))} placeholder="email@company.com" /></div>
+            <div><div style={C.lbl}>Тема</div><input style={C.inp} value={emailDraft.subject} onChange={e => setEmailDraft(p => ({ ...p, subject: e.target.value }))} /></div>
+            <div><div style={C.lbl}>Письмо</div><textarea style={{ ...C.inp, height: 160, resize: "vertical", lineHeight: 1.5, whiteSpace: "pre-wrap" }} value={emailDraft.body} onChange={e => setEmailDraft(p => ({ ...p, body: e.target.value }))} /></div>
           </div>
-          <div style={{ fontSize: 11, color: "var(--color-text-tertiary)", marginTop: 6 }}>От: Dorofeev Vitaliy / BML DV</div>
+          <div style={{ fontSize: 11, color: "var(--color-text-tertiary)", marginTop: 6 }}>От: Dorofeev Vitaliy / BML DV (dorofeev@bml-dv.com)</div>
           <div style={{ display: "flex", gap: 6, marginTop: 8, justifyContent: "flex-end" }}>
             <button style={C.btn()} onClick={() => setEmailDraft(null)}>Отмена</button>
             <button style={C.btn(true)} disabled={emailSending || !emailDraft.to || !emailDraft.subject} onClick={async () => {
@@ -293,9 +294,9 @@ export function LeadDetail({ leads, touches, activities, up, doTouch, mkTouches,
               try {
                 const res = await apiCall("POST", "/api/send", { to: emailDraft.to.split(",").map(s => s.trim()).filter(Boolean), subject: emailDraft.subject, body: emailDraft.body });
                 if (res.ok) {
-                  up("activities", p => [...p, { id: uid(), lead_id: sel, type: "note", content: `Email: ${emailDraft.subject} → ${emailDraft.to}`, at: new Date().toISOString() }]);
+                  up("activities", p => [...p, { id: uid(), lead_id: sel, type: "note", content: `📧 ${emailDraft.subject} → ${emailDraft.to}`, at: new Date().toISOString() }]);
                   setEmailDraft(null);
-                  alert("Отправлено!");
+                  alert("Отправлено на " + emailDraft.to);
                 } else { alert("Ошибка: " + (res.error || "неизвестная")); }
               } catch (err) { alert("Ошибка сети: " + err.message); }
               setEmailSending(false);
