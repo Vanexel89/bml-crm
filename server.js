@@ -165,3 +165,4 @@ app.get("/api/health", auth, async (req, res) => {
 
 app.get("*", (req, res) => { res.sendFile(path.join(__dirname, "public", "index.html")); });
 app.listen(PORT, () => { console.log("BML CRM on port " + PORT + " | Mail: " + (RESEND_API_KEY ? "Resend" : SMTP_HOST ? "SMTP" : "NONE")); });
+// v4.6.0
