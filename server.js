@@ -118,6 +118,34 @@ function buildEmailHtml(text) {
     '</div></body></html>';
 }
 
+// ─── AI ASSISTANT (Claude API proxy) ───
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
+
+app.post("/api/ai", auth, async (req, res) => {
+  if (!ANTHROPIC_API_KEY) return res.status(500).json({ error: "ANTHROPIC_API_KEY not set" });
+  try {
+    const { messages, system } = req.body;
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 1024,
+        system: system || "Ты — AI-ассистент менеджера по продажам контейнерных перевозок Китай→Россия (BML DV). Отвечай кратко, конкретно, по-русски. Давай 2-3 конкретных шага что делать дальше.",
+        messages: messages || [],
+      }),
+    });
+    const data = await r.json();
+    if (!r.ok) return res.status(r.status).json({ error: data.error?.message || JSON.stringify(data) });
+    const text = data.content?.map(c => c.text || "").join("\n") || "";
+    res.json({ ok: true, text });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ─── HEALTH ───
 app.get("/api/health", auth, async (req, res) => {
   let mailOk = false, mailMethod = "none", mailError = "";

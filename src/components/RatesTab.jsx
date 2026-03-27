@@ -5,7 +5,7 @@ import { fmt } from '../utils.js';
 import { parseRateExcel } from '../rates/parseRateExcel.js';
 import * as XLSX from 'xlsx';
 
-export function RatesTab({ freight, boxes, drops, railway, autoMsk, up, importRates }) {
+export function RatesTab({ freight, boxes, drops, railway, autoMsk, up, importRates, settings }) {
   const fileRef = useRef();
   const [importing, setImporting] = useState(false);
   const [preview, setPreview] = useState(null);
@@ -52,7 +52,10 @@ export function RatesTab({ freight, boxes, drops, railway, autoMsk, up, importRa
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 6 }}>
-        <div style={C.section}>Ставки</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={C.section}>Ставки</div>
+          {settings?.ratesLoadedAt && <Badge color="#0F6E56" bg="#E1F5EE" style={{ fontSize: 10 }}>Загружены: {new Date(settings.ratesLoadedAt).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}</Badge>}
+        </div>
         <div style={{ display: "flex", gap: 6 }}>
           <input type="file" ref={fileRef} accept=".xlsx,.xls" style={{ display: "none" }} onChange={handleFile} />
           {freight.length > 0 && <button style={{ ...C.btn(), color: "var(--color-text-danger)" }} onClick={clearAllRates}>Очистить</button>}

@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Badge, Chip, Combobox } from './ui.jsx';
 import { TouchRow } from './TouchRow.jsx';
+import { AIPanel } from './AIPanel.jsx';
 import { C, STATUS, GRADE, OBJECTION_TREE, OBJECTION_SCRIPTS, SPIN_QUESTIONS, CHALLENGER_INSIGHTS, OUTCOMES, EMAIL_TEMPLATES, EMAIL_SIGNATURE } from '../constants.js';
 import { uid, today, fmt, fmtFull, addDays, calcGrade } from '../utils.js';
 import { apiCall } from '../api.js';
@@ -304,6 +305,11 @@ export function LeadDetail({ leads, touches, activities, proposals, up, doTouch,
           </div>
         );
       })()}
+
+      {/* AI Assistant */}
+      <div style={{ marginTop: 14 }}>
+        <AIPanel lead={lead} touches={touches} activities={activities} proposals={proposals} />
+      </div>
 
       {/* Notes & History */}
       <div style={{ ...C.section, marginTop: 14 }}>Заметки и история</div>

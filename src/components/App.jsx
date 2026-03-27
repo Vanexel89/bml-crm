@@ -274,6 +274,7 @@ export function App({ onLogout }) {
   const importRates = (rd) => {
     setData(prev => ({ ...prev, freight: rd.freight, boxes: rd.boxes, drops: rd.drops, railway: rd.railway, autoMsk: rd.autoMsk }));
     save(KEYS.freight, rd.freight); save(KEYS.boxes, rd.boxes); save(KEYS.drops, rd.drops); save(KEYS.railway, rd.railway); save(KEYS.autoMsk, rd.autoMsk);
+    up("settings", prev => ({ ...prev, ratesLoadedAt: new Date().toISOString(), ratesCount: rd.freight.length }));
   };
 
   const ctx = { ...data, up, mkTouches, doTouch, sel, setSel, setTab, importRates, onLogout, goToKP, goToKPFromLead, kpFromCalc, setKpFromCalc, logoB64 };
