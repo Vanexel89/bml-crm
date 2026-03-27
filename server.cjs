@@ -1,9 +1,21 @@
 // BML CRM Server — Express + SQLite + Resend/SMTP Mailer
+const path = require("path");
+const fs = require("fs");
+
+// Load .env file manually (no extra dependency)
+try {
+  const envPath = path.join(__dirname, ".env");
+  if (fs.existsSync(envPath)) {
+    fs.readFileSync(envPath, "utf8").split("\n").forEach(line => {
+      const m = line.match(/^\s*([\w]+)\s*=\s*(.*)\s*$/);
+      if (m && !process.env[m[1]]) process.env[m[1]] = m[2];
+    });
+  }
+} catch (e) { console.error(".env load error:", e.message); }
+
 const express = require("express");
 const Database = require("better-sqlite3");
 const nodemailer = require("nodemailer");
-const path = require("path");
-const fs = require("fs");
 
 const app = express();
 app.use(express.json({ limit: "10mb" }));
