@@ -306,27 +306,34 @@ export function LeadDetail({ leads, touches, activities, proposals, up, doTouch,
         );
       })()}
 
-      {/* AI Assistant */}
-      <div style={{ marginTop: 14 }}>
-        <AIPanel lead={lead} touches={touches} activities={activities} proposals={proposals} />
-      </div>
-
-      {/* Notes & History */}
-      <div style={{ ...C.section, marginTop: 14 }}>Заметки и история</div>
-      <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-        <input style={{ ...C.inp, flex: 1 }} placeholder="Заметка после разговора..." value={noteText} onChange={e => setNoteText(e.target.value)} onKeyDown={e => e.key === "Enter" && addNote()} />
-        <button style={C.btn(true)} onClick={addNote}>+</button>
-      </div>
-      {la.slice(0, 15).map(a => (
-        <div key={a.id} style={{ padding: "6px 0", borderBottom: "0.5px solid var(--color-border-tertiary)", fontSize: 12 }}>
-          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-            <Badge color={a.type === "touch" ? "#534AB7" : a.type === "dial_attempt" ? "#6B7280" : "#6B7280"} bg={a.type === "touch" ? "#EEEDFE" : "#F3F4F6"}>{a.type === "touch" ? "касание" : a.type === "dial_attempt" ? "📵" : "заметка"}</Badge>
-            {a.outcome && <Badge color={OUTCOMES[a.outcome]?.c || "#6B7280"} bg={OUTCOMES[a.outcome]?.bg || "#F3F4F6"}>{OUTCOMES[a.outcome]?.l || a.outcome}</Badge>}
-            <span style={{ fontSize: 10, color: "var(--color-text-tertiary)", marginLeft: "auto" }}>{fmtFull(a.at)}</span>
-          </div>
-          <div style={{ color: "var(--color-text-secondary)", marginTop: 1 }}>{a.content}</div>
+      {/* AI Assistant + Notes — side by side */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 14 }}>
+        <div>
+          <AIPanel lead={lead} touches={touches} activities={activities} proposals={proposals} />
         </div>
-      ))}
+        <div>
+          <div style={{ ...C.card }}>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>Заметки и история</div>
+            <div style={{ display: "flex", gap: 4, marginBottom: 8 }}>
+              <input style={{ ...C.inp, flex: 1, fontSize: 11 }} placeholder="Заметка..." value={noteText} onChange={e => setNoteText(e.target.value)} onKeyDown={e => e.key === "Enter" && addNote()} />
+              <button style={{ ...C.btn(true), padding: "4px 8px" }} onClick={addNote}>+</button>
+            </div>
+            <div style={{ maxHeight: 350, overflow: "auto" }}>
+              {la.slice(0, 20).map(a => (
+                <div key={a.id} style={{ padding: "5px 0", borderBottom: "0.5px solid var(--color-border-tertiary)", fontSize: 11 }}>
+                  <div style={{ display: "flex", gap: 3, alignItems: "center" }}>
+                    <Badge color={a.type === "touch" ? "#534AB7" : a.type === "dial_attempt" ? "#6B7280" : "#6B7280"} bg={a.type === "touch" ? "#EEEDFE" : "#F3F4F6"} style={{ fontSize: 9, padding: "1px 5px" }}>{a.type === "touch" ? "кас" : a.type === "dial_attempt" ? "📵" : "зам"}</Badge>
+                    {a.outcome && <Badge color={OUTCOMES[a.outcome]?.c || "#6B7280"} bg={OUTCOMES[a.outcome]?.bg || "#F3F4F6"} style={{ fontSize: 9, padding: "1px 5px" }}>{OUTCOMES[a.outcome]?.l || a.outcome}</Badge>}
+                    <span style={{ fontSize: 10, color: "var(--color-text-tertiary)", marginLeft: "auto" }}>{fmtFull(a.at)}</span>
+                  </div>
+                  <div style={{ color: "var(--color-text-secondary)", marginTop: 1 }}>{a.content}</div>
+                </div>
+              ))}
+              {la.length === 0 && <div style={{ color: "var(--color-text-tertiary)", fontSize: 11, padding: 8 }}>Нет записей</div>}
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* Email Composer */}
       <div style={{ ...C.section, marginTop: 14 }}>Написать письмо</div>
