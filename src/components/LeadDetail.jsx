@@ -5,8 +5,10 @@ import { AIPanel } from './AIPanel.jsx';
 import { C, STATUS, GRADE, OBJECTION_TREE, OBJECTION_SCRIPTS, SPIN_QUESTIONS, CHALLENGER_INSIGHTS, OUTCOMES, EMAIL_TEMPLATES, EMAIL_SIGNATURE } from '../constants.js';
 import { uid, today, fmt, fmtFull, addDays, calcGrade } from '../utils.js';
 import { apiCall } from '../api.js';
+import { calcChain } from '../rates/calcChain.js';
+import { formatKPVariant, roundUsd, roundRub } from '../kp/buildKPEmail.js';
 
-export function LeadDetail({ leads, touches, activities, proposals, up, doTouch, mkTouches, sel, setSel, setTab, freight, railway, goToKPFromLead, logoB64 }) {
+export function LeadDetail({ leads, touches, activities, proposals, up, doTouch, mkTouches, sel, setSel, setTab, freight, boxes, drops, railway, autoMsk, customAuto, settings, goToKPFromLead, logoB64 }) {
   const lead = leads.find(l => l.id === sel);
   const lt = useMemo(() => touches.filter(t => t.lead_id === sel).sort((a, b) => (a.num || 0) - (b.num || 0)), [touches, sel]);
   const la = useMemo(() => activities.filter(a => a.lead_id === sel).sort((a, b) => new Date(b.at) - new Date(a.at)), [activities, sel]);
@@ -281,6 +283,54 @@ export function LeadDetail({ leads, touches, activities, proposals, up, doTouch,
                     goToKPFromLead({ leadId: sel, routes });
                   }}>КП → ({selectedRoutes.size})</button>
                 )}
+                {(lead.routes || []).length > 0 && hasRates && selectedRoutes.size > 0 && (
+                  <button style={{ ...C.btn(), fontSize: 10, padding: "2px 8px", borderColor: "#0F6E56", color: "#0F6E56" }} onClick={() => {
+                    const routes = [...selectedRoutes].map(i => lead.routes[i]).filter(Boolean);
+                    const tpl = EMAIL_TEMPLATES.logistics_intro;
+                    const city = routes[0]?.city || "";
+                    const usdRate = settings?.usdRate || 90;
+                    const marginUsd = settings?.marginUsd || 100;
+                    const marginRub = settings?.marginRub || 5000;
+                    // Calc rates for each route
+                    const rateLines = [];
+                    routes.forEach((route, ri) => {
+                      const ctype = (route.ctype || "40HC").includes("20") ? "20" : "40";
+                      const weight = route.weight_kg ? Number(route.weight_kg) / 1000 : 22;
+                      const results = calcChain(
+                        { freight, boxes, drops, railway, autoMsk, customAuto, settings: { ...settings, marginUsd, marginRub } },
+                        { pol: route.port, city: route.city, ctype, weight }
+                      );
+                      if (results.length > 0) {
+                        const best = results[0];
+                        const v = {
+                          ctype: ctype === "20" ? "20DC" : "40HC", incoterms: "FOB",
+                          port: route.port, railway_dest: route.city,
+                          isRubFreight: !!best.isRubFreight,
+                          freight_base: best.isRubFreight ? "0" : String(best.totalFreightUsd || ""),
+                          freight_rub: best.isRubFreight ? String(best.freightRubRaw || best.freightRub || "") : "",
+                          freight_margin: String(marginUsd),
+                          railway_base: String(best.rwBase || ""),
+                          railway_margin: String(marginRub),
+                          security: String(best.rwGuard || "5932"),
+                          security_on: (best.rwGuard || 0) > 0,
+                          truck_on: (best.autoRub || 0) > 0,
+                          truck_city: best.autoLabel ? route.city : "",
+                          truck_price: String(best.autoRub || ""),
+                          weight_kg: route.weight_kg || "",
+                          weight_surcharge: best.weightSurcharge || 0,
+                          departure_date: best.departure || "",
+                        };
+                        if (routes.length > 1) rateLines.push(`\nВариант ${ri + 1}:`);
+                        rateLines.push(formatKPVariant(v, ri, false, usdRate));
+                      } else {
+                        rateLines.push(`\n${route.port} -> ${route.city} (${route.ctype || "40HC"}): ставка не найдена`);
+                      }
+                    });
+                    const subj = tpl.subject_with_routes.replace("[город]", city);
+                    const body = tpl.body_with_routes + "\n" + rateLines.join("\n") + "\n\nБуду рад обсудить детали.\n\n" + EMAIL_SIGNATURE;
+                    setEmailDraft({ subject: subj, body, to: (lead.emails_kp || []).join(", "), isLogisticsIntro: true });
+                  }}>✉ В письмо ({selectedRoutes.size})</button>
+                )}
               </div>
             </div>
             {(lead.routes || []).map((r, i) => (
@@ -387,8 +437,7 @@ export function LeadDetail({ leads, touches, activities, proposals, up, doTouch,
           const city = lead.routes?.[0]?.city || "";
           const subj = hasRoutes ? tpl.subject_with_routes.replace("[город]", city) : tpl.subject;
           const body = (hasRoutes ? tpl.body_with_routes : tpl.body) + "\n\n" + EMAIL_SIGNATURE;
-          const emails = (lead.emails_kp || []).concat(lead.emails_raw || []);
-          setEmailDraft({ subject: subj, body, to: [...new Set(emails)].join(", "), isLogisticsIntro: true });
+          setEmailDraft({ subject: subj, body, to: (lead.emails_kp || []).join(", "), isLogisticsIntro: true });
         }}>📋 Отдел логистики</button>
         <button style={{ ...C.btn(), fontSize: 11, padding: "5px 10px" }} onClick={() => {
           const nm = lead.greeting_name || (lead.contact_name ? lead.contact_name.split(" ")[0] : "");
@@ -409,13 +458,11 @@ export function LeadDetail({ leads, touches, activities, proposals, up, doTouch,
             <button style={C.btn(true)} disabled={emailSending || !emailDraft.to || !emailDraft.subject} onClick={async () => {
               setEmailSending(true);
               try {
-                // Build HTML version with logo
-                const bodyLines = emailDraft.body.replace(/\n/g, "<br>");
+                // Build HTML version with logo (public URL, not base64)
                 const sigParts = EMAIL_SIGNATURE.replace(/\n/g, "<br>").replace(/(http[s]?:\/\/[^\s<]+)/g, '<a href="$1" style="color:#1a73e8;text-decoration:none;">$1</a>');
-                const logoHtml = logoB64 ? `<img src="${logoB64}" alt="BML" style="height:40px;margin-bottom:8px;" /><br>` : "";
-                // Split body from signature for HTML layout
+                const logoHtml = `<img src="http://80.71.159.26/logo.png" alt="BML DV" style="height:40px;margin-bottom:8px;" /><br>`;
                 const sigIdx = emailDraft.body.indexOf("Best regards");
-                const mainBody = sigIdx > 0 ? emailDraft.body.slice(0, sigIdx).trim().replace(/\n/g, "<br>") : bodyLines;
+                const mainBody = (sigIdx > 0 ? emailDraft.body.slice(0, sigIdx).trim() : emailDraft.body).replace(/\n/g, "<br>");
                 const html = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;"><div style="max-width:700px;margin:20px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.1);"><div style="padding:24px 28px;font-size:14px;line-height:1.7;color:#333;">${mainBody}</div><div style="border-top:1px solid #e8e8e8;padding:16px 28px;font-size:12px;color:#888;line-height:1.6;">${logoHtml}${sigParts}</div></div></body></html>`;
                 const res = await apiCall("POST", "/api/send", { to: emailDraft.to.split(",").map(s => s.trim()).filter(Boolean), subject: emailDraft.subject, body: emailDraft.body, html });
                 if (res.ok) {
