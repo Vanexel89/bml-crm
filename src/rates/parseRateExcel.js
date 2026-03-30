@@ -84,8 +84,9 @@ export function parseRateExcel(wb, XLSX) {
     if (!city || city.includes("Город") || city.includes("Регион")) continue;
     const p20raw = r[7] !== null && r[7] !== undefined ? r[7] : r[4];
     const p40raw = r[8] !== null && r[8] !== undefined ? r[8] : r[5];
-    const p20 = typeof p20raw === 'string' && p20raw.includes('запрос') ? -1 : num(p20raw);
-    const p40 = typeof p40raw === 'string' && p40raw.includes('запрос') ? -1 : num(p40raw);
+    const dropUnavail = v => { const s = String(v||"").toLowerCase().trim(); return s.includes("запрос") || s === "нет" || s.includes("нет выдачи"); };
+    const p20 = dropUnavail(p20raw) ? -1 : num(p20raw);
+    const p40 = dropUnavail(p40raw) ? -1 : num(p40raw);
     drops.push({ sc: String(r[0]||"").trim(), line: String(r[1]||"").trim(), city, owner: String(r[3]||"").trim(), p20, p40, freeTime: String(r[9]||""), penalty: String(r[10]||""), validity: String(r[11]||"") });
   }
 
