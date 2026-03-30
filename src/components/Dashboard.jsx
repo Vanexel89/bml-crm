@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Badge } from './ui.jsx';
 import { C, GRADE, STATUS } from '../constants.js';
 import { today, fmt, fmtFull, addDays } from '../utils.js';
-import { calcChain } from '../rates/calcChain.js';
+import { compareProposalRates } from '../rates/compareSnapshot.js';
 
 const startOfWeek = () => {
   const d = new Date(); const day = d.getDay();
@@ -24,32 +24,25 @@ export function Dashboard({ leads, touches, activities, proposals, doTouch, setS
     if (!freight || freight.length === 0) return [];
     const alerts = [];
     const seen = new Set();
+    const rateData = { freight, boxes, drops, railway, autoMsk, customAuto, settings };
+    // Only check active leads
+    const activeLeadIds = new Set(leads.filter(l => !["won","lost","frozen"].includes(l.status)).map(l => l.id));
     proposals.forEach(p => {
-      if (!p.rateSnapshot || seen.has(p.lead_id)) return;
-      p.rateSnapshot.forEach(snap => {
-        if (!snap.port || !snap.city) return;
-        const ctype = (snap.ctype || "40HC").includes("20") ? "20" : "40";
-        const results = calcChain(
-          { freight, boxes, drops, railway, autoMsk, customAuto, settings: settings || {} },
-          { pol: snap.port, city: snap.city, ctype, weight: 22 }
-        );
-        if (results.length > 0) {
-          const bestNow = results[0];
-          const oldFreight = snap.freightBase || 0;
-          const oldRailway = snap.railwayBase || 0;
-          const newFreight = bestNow.isRubFreight ? 0 : bestNow.totalFreightUsd;
-          const newRailway = bestNow.rwBase;
-          if (newFreight < oldFreight || newRailway < oldRailway) {
-            const lead = leads.find(l => l.id === p.lead_id);
-            if (lead && !seen.has(p.lead_id)) {
-              seen.add(p.lead_id);
-              const savings = [];
-              if (newFreight < oldFreight) savings.push(`фрахт $${oldFreight}→$${newFreight}`);
-              if (newRailway < oldRailway) savings.push(`ЖД ${oldRailway.toLocaleString("ru")}→${newRailway.toLocaleString("ru")}₽`);
-              alerts.push({ leadId: p.lead_id, company: lead.company_name, route: `${snap.port}→${snap.city}`, savings: savings.join(", ") });
-            }
-          }
-        }
+      if (!p.rateSnapshot || seen.has(p.lead_id) || !activeLeadIds.has(p.lead_id)) return;
+      const cmp = compareProposalRates(p, rateData);
+      if (!cmp || cmp.overall === "ok") return;
+      seen.add(p.lead_id);
+      const lead = leads.find(l => l.id === p.lead_id);
+      if (!lead) return;
+      cmp.variants.forEach(v => {
+        if (v.status === "ok") return;
+        alerts.push({
+          leadId: p.lead_id,
+          company: lead.company_name,
+          route: `${v.snap.port}→${v.snap.city}`,
+          status: v.status, // "cheaper" | "dearer" | "gone"
+          detail: v.detail || "",
+        });
       });
     });
     return alerts;
@@ -149,17 +142,23 @@ export function Dashboard({ leads, touches, activities, proposals, doTouch, setS
 
       {rateAlerts.length > 0 && (
         <div style={{ marginBottom: 16 }}>
-          <div style={C.section}>Ставки стали дешевле <Badge color="#3B6D11" bg="#EAF3DE">{rateAlerts.length}</Badge></div>
-          {rateAlerts.map((a, i) => (
-            <div key={i} style={{ ...C.card, display: "flex", alignItems: "center", gap: 8, padding: "9px 14px", borderLeft: "3px solid #3B6D11" }}>
-              <Badge color="#3B6D11" bg="#EAF3DE">↓</Badge>
-              <div style={{ flex: 1 }}>
-                <span style={{ fontWeight: 600, cursor: "pointer" }} onClick={() => { setSel(a.leadId); setTab("leads"); }}>{a.company}</span>
-                <div style={{ fontSize: 11, color: "var(--color-text-secondary)", marginTop: 1 }}>{a.route}: {a.savings}</div>
+          <div style={C.section}>Изменения ставок <Badge color="#854F0B" bg="#FAEEDA">{rateAlerts.length}</Badge></div>
+          {rateAlerts.map((a, i) => {
+            const colors = { cheaper: { border: "#3B6D11", c: "#3B6D11", bg: "#EAF3DE", icon: "↓" }, dearer: { border: "#D85A30", c: "#D85A30", bg: "#FAECE7", icon: "↑" }, gone: { border: "#A32D2D", c: "#A32D2D", bg: "#FCEBEB", icon: "✕" } };
+            const st = colors[a.status] || colors.gone;
+            return (
+              <div key={i} style={{ ...C.card, display: "flex", alignItems: "center", gap: 8, padding: "9px 14px", borderLeft: `3px solid ${st.border}` }}>
+                <Badge color={st.c} bg={st.bg}>{st.icon}</Badge>
+                <div style={{ flex: 1 }}>
+                  <span style={{ fontWeight: 600, cursor: "pointer" }} onClick={() => { setSel(a.leadId); setTab("leads"); }}>{a.company}</span>
+                  <div style={{ fontSize: 11, color: "var(--color-text-secondary)", marginTop: 1 }}>
+                    {a.route}: {a.status === "gone" ? "ставка удалена из базы" : a.detail}
+                  </div>
+                </div>
+                <button style={{ ...C.btn(), fontSize: 10, padding: "3px 10px" }} onClick={() => { setSel(a.leadId); setTab("leads"); }}>Открыть</button>
               </div>
-              <button style={{ ...C.btn(), fontSize: 10, padding: "3px 10px" }} onClick={() => { setSel(a.leadId); setTab("leads"); }}>Открыть</button>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

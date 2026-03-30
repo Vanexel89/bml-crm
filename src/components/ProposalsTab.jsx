@@ -5,6 +5,7 @@ import { uid, fmtFull } from '../utils.js';
 import { apiCall } from '../api.js';
 import { calcChain } from '../rates/calcChain.js';
 import { calcWeightSurcharge } from '../rates/weightSurcharge.js';
+import { compareProposalRates } from '../rates/compareSnapshot.js';
 import { EMPTY_VARIANT, formatKPVariant, buildKPEmailHtml, buildKPPlainText } from '../kp/buildKPEmail.js';
 
 export function ProposalsTab({ proposals, leads, up, settings, kpFromCalc, setKpFromCalc, freight, boxes, drops, railway, autoMsk, customAuto, logoB64 }) {
@@ -352,15 +353,21 @@ export function ProposalsTab({ proposals, leads, up, settings, kpFromCalc, setKp
 
       {/* Saved proposals list */}
       {proposals.length === 0 ? <div style={{ ...C.card, ...C.empty }}>Нет КП</div> : (
-        [...proposals].reverse().map(p => (
+        [...proposals].reverse().map(p => {
+          const rateData = { freight, boxes, drops, railway, autoMsk, customAuto, settings };
+          const cmp = compareProposalRates(p, rateData);
+          const rateStatus = cmp?.overall || "ok";
+          const rateBadge = { cheaper: { c: "#3B6D11", bg: "#EAF3DE", l: "↓ Дешевле" }, dearer: { c: "#D85A30", bg: "#FAECE7", l: "↑ Дороже" }, gone: { c: "#A32D2D", bg: "#FCEBEB", l: "✕ Нет ставки" } }[rateStatus];
+          return (
           <div key={p.id} style={{ ...C.card, padding: "11px 14px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                 <span style={{ fontWeight: 600 }}>{p.company}</span>
                 <Badge color={p.type === "intro" ? "#185FA5" : "#D85A30"} bg={p.type === "intro" ? "#E6F1FB" : "#FAECE7"}>{p.type === "intro" ? "Ознак." : "Конкрет."}</Badge>
                 <Badge color={p.status === "sent" ? "#3B6D11" : "#6B7280"} bg={p.status === "sent" ? "#EAF3DE" : "#F3F4F6"}>
                   {p.status === "draft" ? "Черновик" : "Отправлено"}
                 </Badge>
+                {rateBadge && <Badge color={rateBadge.c} bg={rateBadge.bg}>{rateBadge.l}</Badge>}
                 <span style={{ fontSize: 11, color: "var(--color-text-tertiary)" }}>#{p.ver} — {fmtFull(p.created)}</span>
               </div>
               <div style={{ display: "flex", gap: 4 }}>
@@ -374,6 +381,15 @@ export function ProposalsTab({ proposals, leads, up, settings, kpFromCalc, setKp
             </div>
             {p.emails?.length > 0 && <div style={{ fontSize: 10, color: "var(--color-text-tertiary)", marginTop: 3 }}>To: {p.emails.join(", ")}{p.emails_cc?.length > 0 ? ` | CC: ${p.emails_cc.join(", ")}` : ""}</div>}
             {p.variants && <div style={{ fontSize: 10, color: "var(--color-text-secondary)", marginTop: 3 }}>{p.variants.length} вариант(ов): {p.variants.map(v => `${v.ctype} ${v.port || "?"} → ${v.railway_dest || "?"}`).join(" | ")}</div>}
+            {cmp && cmp.variants.some(v => v.status !== "ok") && (
+              <div style={{ fontSize: 10, color: "var(--color-text-tertiary)", marginTop: 3 }}>
+                {cmp.variants.filter(v => v.status !== "ok").map((v, i) => (
+                  <span key={i} style={{ color: v.status === "gone" ? "#A32D2D" : v.status === "dearer" ? "#D85A30" : "#3B6D11" }}>
+                    {v.snap.port}→{v.snap.city}: {v.status === "gone" ? "удалена" : v.detail}{i < cmp.variants.filter(x => x.status !== "ok").length - 1 ? " | " : ""}
+                  </span>
+                ))}
+              </div>
+            )}
             {expandedKP === p.id && (
               <div style={{ marginTop: 8, borderRadius: 8, overflow: "hidden", border: "0.5px solid var(--color-border-tertiary)" }}>
                 {p.html ? (
@@ -386,7 +402,8 @@ export function ProposalsTab({ proposals, leads, up, settings, kpFromCalc, setKp
               </div>
             )}
           </div>
-        ))
+          );
+        })
       )}
     </div>
   );
