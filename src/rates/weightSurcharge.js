@@ -8,7 +8,7 @@ export function calcWeightSurcharge(comment, is20, weightTons) {
 
   if (is20) {
     const t1 = text;
-    const range20 = /20\s*(?:фт|фут|'|dc)\s*[-–]?\s*(\d+[,.]?\d*)\s*[-–]\s*(\d+[,.]?\d*)\s*\+\s*(\d+)\s*(?:usd|\$)/i.exec(t1);
+    const range20 = /20\s*(?:фт|фут|'|dc)\s*[-–]?\s*(\d+[,.]?\d*)\s*т?\s*[-–]\s*(\d+[,.]?\d*)\s*т?\s*\+\s*(\d+)\s*(?:usd|\$)/i.exec(t1);
     if (range20) {
       const lo = parseNum(range20[1]), hi = parseNum(range20[2]), add = Number(range20[3]);
       if (weightTons >= lo && weightTons <= hi) { surcharge = add; notes.push(`вес ${weightTons}т (${lo}-${hi}т +$${add})`); matched = true; }
@@ -21,7 +21,7 @@ export function calcWeightSurcharge(comment, is20, weightTons) {
     }
   } else {
     const parts40 = text.includes("/") ? text.split("/").slice(1).join("/") : text;
-    const range40 = /40\s*(?:фт|фут|'|hc|dc)\s*[-–]?\s*(\d+[,.]?\d*)\s*[-–]\s*(\d+[,.]?\d*)\s*\+\s*(\d+)\s*(?:usd|\$)/i.exec(parts40);
+    const range40 = /40\s*(?:фт|фут|'|hc|dc)\s*[-–]?\s*(\d+[,.]?\d*)\s*т?\s*[-–]\s*(\d+[,.]?\d*)\s*т?\s*\+\s*(\d+)\s*(?:usd|\$)/i.exec(parts40);
     if (range40) {
       const lo = parseNum(range40[1]), hi = parseNum(range40[2]), add = Number(range40[3]);
       if (weightTons >= lo && weightTons <= hi) { surcharge = add; notes.push(`вес ${weightTons}т (${lo}-${hi}т +$${add})`); matched = true; }

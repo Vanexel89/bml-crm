@@ -153,7 +153,8 @@ export function ProposalsTab({ proposals, leads, up, settings, kpFromCalc, setKp
   const kpEmails = selectedLead?.emails_kp || [];
   const kpEmailsCc = selectedLead?.emails_cc || [];
   const contactFirstName = (selectedLead?.contact_name || "").split(" ")[0] || "";
-  const emailGreeting = selectedLead?.email_greeting || (contactFirstName ? `Добрый день, ${contactFirstName}!` : "Добрый день!");
+  const greetingName = selectedLead?.greeting_name || contactFirstName || "";
+  const emailGreeting = greetingName ? `${greetingName}, добрый день.` : "Добрый день!";
   const usdRate = settings?.usdRate || 90;
 
   const addVariant = () => setVariants(p => [...p, EMPTY_VARIANT()]);
