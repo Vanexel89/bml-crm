@@ -6,7 +6,7 @@ import { C, STATUS, GRADE, OBJECTION_TREE, OBJECTION_SCRIPTS, SPIN_QUESTIONS, CH
 import { uid, today, fmt, fmtFull, addDays, calcGrade } from '../utils.js';
 import { apiCall } from '../api.js';
 
-export function LeadDetail({ leads, touches, activities, proposals, up, doTouch, mkTouches, sel, setSel, setTab, freight, railway, goToKPFromLead }) {
+export function LeadDetail({ leads, touches, activities, proposals, up, doTouch, mkTouches, sel, setSel, setTab, freight, railway, goToKPFromLead, logoB64 }) {
   const lead = leads.find(l => l.id === sel);
   const lt = useMemo(() => touches.filter(t => t.lead_id === sel).sort((a, b) => (a.num || 0) - (b.num || 0)), [touches, sel]);
   const la = useMemo(() => activities.filter(a => a.lead_id === sel).sort((a, b) => new Date(b.at) - new Date(a.at)), [activities, sel]);
@@ -409,7 +409,15 @@ export function LeadDetail({ leads, touches, activities, proposals, up, doTouch,
             <button style={C.btn(true)} disabled={emailSending || !emailDraft.to || !emailDraft.subject} onClick={async () => {
               setEmailSending(true);
               try {
-                const res = await apiCall("POST", "/api/send", { to: emailDraft.to.split(",").map(s => s.trim()).filter(Boolean), subject: emailDraft.subject, body: emailDraft.body });
+                // Build HTML version with logo
+                const bodyLines = emailDraft.body.replace(/\n/g, "<br>");
+                const sigParts = EMAIL_SIGNATURE.replace(/\n/g, "<br>").replace(/(http[s]?:\/\/[^\s<]+)/g, '<a href="$1" style="color:#1a73e8;text-decoration:none;">$1</a>');
+                const logoHtml = logoB64 ? `<img src="${logoB64}" alt="BML" style="height:40px;margin-bottom:8px;" /><br>` : "";
+                // Split body from signature for HTML layout
+                const sigIdx = emailDraft.body.indexOf("Best regards");
+                const mainBody = sigIdx > 0 ? emailDraft.body.slice(0, sigIdx).trim().replace(/\n/g, "<br>") : bodyLines;
+                const html = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;"><div style="max-width:700px;margin:20px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.1);"><div style="padding:24px 28px;font-size:14px;line-height:1.7;color:#333;">${mainBody}</div><div style="border-top:1px solid #e8e8e8;padding:16px 28px;font-size:12px;color:#888;line-height:1.6;">${logoHtml}${sigParts}</div></div></body></html>`;
+                const res = await apiCall("POST", "/api/send", { to: emailDraft.to.split(",").map(s => s.trim()).filter(Boolean), subject: emailDraft.subject, body: emailDraft.body, html });
                 if (res.ok) {
                   up("activities", p => [...p, { id: uid(), lead_id: sel, type: "note", content: `📧 ${emailDraft.subject} → ${emailDraft.to}`, at: new Date().toISOString() }]);
                   // Auto-task: call in 2 days after logistics_intro
