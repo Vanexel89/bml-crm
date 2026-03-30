@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Badge } from './ui.jsx';
 import { C } from '../constants.js';
-import { fmt } from '../utils.js';
+import { fmt, fmtUsd } from '../utils.js';
 import { calcChain } from '../rates/calcChain.js';
 
 export function CalcTab({ freight, boxes, drops, railway, autoMsk, customAuto, settings, up, goToKP }) {
@@ -81,7 +81,7 @@ export function CalcTab({ freight, boxes, drops, railway, autoMsk, customAuto, s
             <div>
               <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
                 <div style={{ ...C.metric, borderLeft: "3px solid #3B6D11" }}><div style={{ fontSize: 10, color: "var(--color-text-tertiary)", textTransform: "uppercase", fontWeight: 500 }}>Лучший итого</div><div style={{ fontSize: 20, fontWeight: 700, color: "#3B6D11" }}>{best.totalRub.toLocaleString("ru")} ₽</div><div style={{ fontSize: 11, color: "var(--color-text-secondary)" }}>{best.line} / {best.ownerType}</div></div>
-                <div style={C.metric}><div style={{ fontSize: 10, color: "var(--color-text-tertiary)", textTransform: "uppercase", fontWeight: 500 }}>Фрахт лучший</div><div style={{ fontSize: 18, fontWeight: 700 }}>{best.isRubFreight ? `${best.freightRub.toLocaleString("ru")} ₽` : `$${best.freightWithMargin}`}</div><div style={{ fontSize: 11, color: "var(--color-text-secondary)" }}>{best.isRubFreight ? "в ₽, дроп вкл." : `= $${best.totalFreightUsd} + $${Number(mUsd)} маржа`}</div></div>
+                <div style={C.metric}><div style={{ fontSize: 10, color: "var(--color-text-tertiary)", textTransform: "uppercase", fontWeight: 500 }}>Фрахт лучший</div><div style={{ fontSize: 18, fontWeight: 700 }}>{best.isRubFreight ? `${best.freightRub.toLocaleString("ru")} ₽` : `$${fmtUsd(best.freightWithMargin)}`}</div><div style={{ fontSize: 11, color: "var(--color-text-secondary)" }}>{best.isRubFreight ? "в ₽, дроп вкл." : `= $${fmtUsd(best.totalFreightUsd)} + $${Number(mUsd)} маржа`}</div></div>
                 <div style={C.metric}><div style={{ fontSize: 10, color: "var(--color-text-tertiary)", textTransform: "uppercase", fontWeight: 500 }}>Вариантов</div><div style={{ fontSize: 18, fontWeight: 700 }}>{groupedResults.length}</div></div>
               </div>
 
@@ -107,8 +107,8 @@ export function CalcTab({ freight, boxes, drops, railway, autoMsk, customAuto, s
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 6, fontSize: 11 }}>
                       <div style={{ padding: "6px 8px", background: "var(--color-background-secondary)", borderRadius: 6 }}>
                         <div style={{ color: "var(--color-text-tertiary)", fontSize: 10 }}>Фрахт + {r.boxDropLabel}</div>
-                        <div style={{ fontWeight: 600 }}>{r.isRubFreight ? `${r.freightRub.toLocaleString("ru")} ₽` : `$${r.freightWithMargin}`} <span style={{ fontWeight: 400, color: "var(--color-text-secondary)" }}>{r.isRubFreight ? `(${r.freightRubRaw?.toLocaleString("ru")} + маржа)` : `(${r.freightRub.toLocaleString("ru")} ₽)`}</span></div>
-                        <div style={{ color: "var(--color-text-tertiary)", fontSize: 10 }}>{r.isRubFreight ? "Фрахт в ₽, дроп вкл. в ЖД" : `$${r.freightUsd} фрахт ${r.boxDropUsd >= 0 ? "+" : ""}${r.boxDropUsd} ${r.ownerType === "SOC" ? "ящик" : "дроп"} + $${Number(mUsd)} маржа${r.weightSurcharge ? ` + $${r.weightSurcharge} вес` : ""}`}</div>
+                        <div style={{ fontWeight: 600 }}>{r.isRubFreight ? `${r.freightRub.toLocaleString("ru")} ₽` : `$${fmtUsd(r.freightWithMargin)}`} <span style={{ fontWeight: 400, color: "var(--color-text-secondary)" }}>{r.isRubFreight ? `(${r.freightRubRaw?.toLocaleString("ru")} + маржа)` : `(${r.freightRub.toLocaleString("ru")} ₽)`}</span></div>
+                        <div style={{ color: "var(--color-text-tertiary)", fontSize: 10 }}>{r.isRubFreight ? "Фрахт в ₽, дроп вкл. в ЖД" : `$${fmtUsd(r.freightUsd)} фрахт ${r.boxDropUsd >= 0 ? "+" : ""}${fmtUsd(r.boxDropUsd)} ${r.ownerType === "SOC" ? "ящик" : "дроп"} + $${Number(mUsd)} маржа${r.weightSurcharge ? ` + $${r.weightSurcharge} вес` : ""}`}</div>
                         {r.weightNote && <div style={{ color: "#854F0B", fontSize: 9, marginTop: 2 }}>⚖ {r.weightNote}</div>}
                         {r.validity && <div style={{ color: "var(--color-text-tertiary)", fontSize: 9, marginTop: 2 }}>Валидн.: {r.validity}</div>}
                       </div>

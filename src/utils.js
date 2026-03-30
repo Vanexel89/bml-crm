@@ -4,6 +4,7 @@ export const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() 
 export const fmt = d => { if (!d) return "—"; const dt = new Date(d); if (isNaN(dt.getTime())) return String(d).slice(0, 12); return dt.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" }); };
 export const fmtFull = d => { if (!d) return "—"; const dt = new Date(d); if (isNaN(dt.getTime())) return String(d).slice(0, 20); return dt.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" }); };
 export const weekAgo = () => addDays(today(), -7);
+export const fmtUsd = v => { const n = Math.round(Number(v) * 100) / 100; return Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/\.?0+$/, ""); };
 
 export function calcGrade(v) {
   const vol = v.volume_monthly || 0;
