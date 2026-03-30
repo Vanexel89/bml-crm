@@ -242,12 +242,19 @@ export function LeadDetail({ leads, touches, activities, proposals, up, doTouch,
           <div style={C.card}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
               <span style={{ fontSize: 12, fontWeight: 600 }}>Направления</span>
-              {(lead.routes || []).length > 0 && hasRates && selectedRoutes.size > 0 && (
-                <button style={{ ...C.btn(true), fontSize: 10, padding: "2px 8px" }} onClick={() => {
-                  const routes = [...selectedRoutes].map(i => lead.routes[i]).filter(Boolean);
-                  goToKPFromLead({ leadId: sel, routes });
-                }}>КП → ({selectedRoutes.size})</button>
-              )}
+              <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                {(lead.routes || []).length > 0 && hasRates && (
+                  <button style={{ ...C.btn(), fontSize: 10, padding: "2px 8px" }} onClick={selectAllRoutes}>
+                    {selectedRoutes.size === (lead.routes||[]).length ? "Снять все" : "Выбрать все"}
+                  </button>
+                )}
+                {(lead.routes || []).length > 0 && hasRates && selectedRoutes.size > 0 && (
+                  <button style={{ ...C.btn(true), fontSize: 10, padding: "2px 8px" }} onClick={() => {
+                    const routes = [...selectedRoutes].map(i => lead.routes[i]).filter(Boolean);
+                    goToKPFromLead({ leadId: sel, routes });
+                  }}>КП → ({selectedRoutes.size})</button>
+                )}
+              </div>
             </div>
             {(lead.routes || []).map((r, i) => (
               <div key={i} style={{ display: "flex", gap: 4, alignItems: "center", padding: "4px 0", borderBottom: "0.5px solid var(--color-border-tertiary)", fontSize: 12 }}>
