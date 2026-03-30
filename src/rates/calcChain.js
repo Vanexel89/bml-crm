@@ -160,7 +160,8 @@ export function calcChain({ freight, boxes, drops, railway, autoMsk, customAuto,
 
     const pushResult = (opt, rw, dateWarnings) => {
       const ws = calcWeightSurcharge(fr.comment, is20, weight);
-      const freightWithMargin = opt.totalFreightUsd + marginUsd + ws.surcharge;
+      const totalFreightUsd = Math.round(opt.totalFreightUsd * 100) / 100;
+      const freightWithMargin = Math.round((totalFreightUsd + marginUsd + ws.surcharge) * 100) / 100;
       const rwWithMargin = rw.base + marginRub;
       const freightRub = Math.round(freightWithMargin * usdRate);
       const totalRub = freightRub + rwWithMargin + rw.guard + autoRub;
@@ -168,8 +169,9 @@ export function calcChain({ freight, boxes, drops, railway, autoMsk, customAuto,
       results.push({
         id: uid(), line: fr.line, service: fr.service, pol: fr.pol, transship: fr.transship,
         terminal: fr.terminal, departure: fr.departure, validity: fr.validity, comment: fr.comment,
-        ownerType: opt.type, freightUsd: opt.freightUsd, boxDropUsd: opt.boxDropUsd,
-        boxDropLabel: opt.boxDropLabel, totalFreightUsd: opt.totalFreightUsd,
+        ownerType: opt.type, freightUsd: Math.round(opt.freightUsd * 100) / 100,
+        boxDropUsd: Math.round(opt.boxDropUsd * 100) / 100,
+        boxDropLabel: opt.boxDropLabel, totalFreightUsd,
         freightWithMargin, freightRub, isRubFreight: false,
         rwBase: rw.base, rwGuard: rw.guard, rwWithMargin, rwTerminal: rw.terminal, rwValidity: rw.validity,
         autoRub, autoLabel, marginUsd, marginRub, marginTotalRub, totalRub,

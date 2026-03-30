@@ -2,7 +2,7 @@ import { uid } from '../utils.js';
 
 const VALID_POLS = ['SHANGHAI','NINGBO','QINGDAO','TIANJIN','XINGANG','YANTIAN','NANSHA','XIAMEN','SHEKOU','RIZHAO','DALIAN','TAICANG','BUSAN','LAEM CHA BANG','PORT KLANG'];
 export const isPol = s => { const u = (s||"").toUpperCase(); return VALID_POLS.some(p => u.includes(p)) || /^[A-Z]{3,}/.test(u.replace(/[^A-Z ]/g,'')); };
-export const num = v => { const n = Number(v); return isNaN(n) ? 0 : n; };
+export const num = v => { const n = Number(v); return isNaN(n) ? 0 : Math.round(n * 100) / 100; };
 export const parseRange = s => { if (!s) return 0; const m = String(s).match(/(\d+)\s*[-–]\s*(\d+)/); if (m) return Math.round((parseInt(m[1])+parseInt(m[2]))/2); return num(s); };
 export const normCity = c => { if (!c) return ""; const u = c.toUpperCase().trim(); const map = {"MOSCOW":"Москва","ST-PETERSBURG":"Санкт-Петербург","EKATERINBURG":"Екатеринбург","NOVOSIBIRSK":"Новосибирск","KRASNOYARSK":"Красноярск","VLADIVOSTOK":"Владивосток","NAHODKA":"Находка","VLADIVOSTOK/VRANGEL":"Владивосток","ROSTOV-ON-DON":"Ростов-на-Дону","IRKUTZK":"Иркутск","KAZAN":"Казань","PENZA":"Пенза","NIZHNY NOVGOROD":"Нижний Новгород","CHELYABINSK":"Челябинск","TOGLIATTI":"Тольятти","KHABAROVSK":"Хабаровск"}; return map[u] || c.trim(); };
 export const normPol = p => { if (!p) return ""; let u = p.toUpperCase().trim(); if (u.includes("XINGANG")) return "TIANJIN (XINGANG)"; return u; };
