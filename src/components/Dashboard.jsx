@@ -1,15 +1,22 @@
 import React, { useState, useMemo } from 'react';
 import { Badge } from './ui.jsx';
 import { C, GRADE, STATUS } from '../constants.js';
-import { today, fmt, fmtFull, addDays, weekAgo } from '../utils.js';
+import { today, fmt, fmtFull, addDays } from '../utils.js';
 import { calcChain } from '../rates/calcChain.js';
+
+const startOfWeek = () => {
+  const d = new Date(); const day = d.getDay();
+  const diff = day === 0 ? 6 : day - 1;
+  d.setDate(d.getDate() - diff);
+  return d.toISOString().split("T")[0];
+};
 
 export function Dashboard({ leads, touches, activities, proposals, doTouch, setSel, setTab, freight, boxes, drops, railway, autoMsk, customAuto, settings }) {
   const [at, setAt] = useState(null);
   const [oc, setOc] = useState("no_answer");
   const [nt, setNt] = useState("");
   const d = today();
-  const w = weekAgo();
+  const w = startOfWeek();
 
   const tasks = useMemo(() => touches.filter(t => t.status === "scheduled" && t.date <= d).sort((a, b) => (a.date < d ? -1 : 0) - (b.date < d ? -1 : 0) || b.num - a.num), [touches, d]);
 

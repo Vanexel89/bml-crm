@@ -3,11 +3,20 @@ import { Badge } from './ui.jsx';
 import { C, STATUS, OUTCOMES, OBJECTION_TREE } from '../constants.js';
 import { today, addDays, fmtFull } from '../utils.js';
 
+const startOfWeek = () => {
+  const d = new Date(); const day = d.getDay();
+  const diff = day === 0 ? 6 : day - 1; // Monday=0 offset
+  d.setDate(d.getDate() - diff);
+  return d.toISOString().split("T")[0];
+};
+const startOfMonth = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-01`; };
+const startOfQuarter = () => { const d = new Date(); const qm = Math.floor(d.getMonth() / 3) * 3; return `${d.getFullYear()}-${String(qm+1).padStart(2,"0")}-01`; };
+
 const PERIODS = [
   { id: "today",  l: "Сегодня",   fn: () => [today(), today()] },
-  { id: "week",   l: "Неделя",    fn: () => [addDays(today(), -6), today()] },
-  { id: "month",  l: "Месяц",     fn: () => [addDays(today(), -29), today()] },
-  { id: "quarter",l: "Квартал",   fn: () => [addDays(today(), -89), today()] },
+  { id: "week",   l: "Неделя",    fn: () => [startOfWeek(), today()] },
+  { id: "month",  l: "Месяц",     fn: () => [startOfMonth(), today()] },
+  { id: "quarter",l: "Квартал",   fn: () => [startOfQuarter(), today()] },
   { id: "all",    l: "Всё время", fn: () => ["2020-01-01", today()] },
 ];
 
@@ -81,7 +90,7 @@ export function AnalyticsTab({ leads, touches, activities, proposals }) {
 
     const calls = periodTouches.filter(t => t.type === "call").length;
     const emails = periodTouches.filter(t => t.type === "email").length;
-    const kpSent = periodProposals.filter(p => p.status === "sent").length;
+    const kpSent = proposals.filter(p => p.status === "sent" && p.sent && inRange(p.sent, from, to)).length;
     const kpDraft = periodProposals.filter(p => p.status === "draft").length;
     const conversations = periodTouches.filter(t => t.outcome && t.outcome !== "no_answer").length;
     const interested = periodTouches.filter(t => t.outcome === "interested").length;
@@ -178,12 +187,12 @@ export function AnalyticsTab({ leads, touches, activities, proposals }) {
     while (start <= to) {
       const end = addDays(start, 6) > to ? to : addDays(start, 6);
       const wTouches = touches.filter(t => t.done && inRange(t.done, start, end));
-      const wKP = proposals.filter(p => inRange(p.created, start, end));
+      const wKPSent = proposals.filter(p => p.status === "sent" && p.sent && inRange(p.sent, start, end));
       weeks.push({
         label: `${start.slice(5)} — ${end.slice(5)}`,
         calls: wTouches.filter(t => t.type === "call").length,
         emails: wTouches.filter(t => t.type === "email").length,
-        kp: wKP.length,
+        kp: wKPSent.length,
         interested: wTouches.filter(t => t.outcome === "interested").length,
         objections: wTouches.filter(t => t.outcome === "objection").length,
         noAnswer: wTouches.filter(t => t.outcome === "no_answer").length,
