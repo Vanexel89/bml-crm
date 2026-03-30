@@ -332,7 +332,7 @@ export const EMAIL_TEMPLATES = {
   },
 };
 
-export const LOGO_URL = "https://raw.githubusercontent.com/Vanexel89/bml-crm/main/static/logo.png";
+export const LOGO_URL = "https://avatars.mds.yandex.net/get-mail-signature/200369/7f148d1968ee25c40680335e8bb89baf/orig";
 
 export const EMAIL_SIGNATURE = `Best regards,
 
