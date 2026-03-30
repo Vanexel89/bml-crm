@@ -30,7 +30,7 @@ const SMTP_USER = process.env.SMTP_USER || "";
 const SMTP_PASS = process.env.SMTP_PASS || "";
 const FROM_NAME = process.env.FROM_NAME || "Dorofeev Vitaliy / BML DV";
 const FROM_EMAIL = process.env.FROM_EMAIL || "";
-const LOGO_URL = process.env.LOGO_URL || "http://80.71.159.26/logo.png";
+const LOGO_URL = process.env.LOGO_URL || "https://raw.githubusercontent.com/Vanexel89/bml-crm/main/static/logo.png";
 
 function auth(req, res, next) {
   const key = req.headers["x-api-key"];

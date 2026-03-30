@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Badge, Combobox } from './ui.jsx';
-import { C, EMAIL_SIGNATURE } from '../constants.js';
+import { C, EMAIL_SIGNATURE, LOGO_URL } from '../constants.js';
 import { uid, fmtFull } from '../utils.js';
 import { apiCall } from '../api.js';
 import { calcChain } from '../rates/calcChain.js';
@@ -163,7 +163,7 @@ export function ProposalsTab({ proposals, leads, up, settings, kpFromCalc, setKp
   const updVariant = (id, field, val) => setVariants(p => p.map(v => v.id === id ? { ...v, [field]: val } : v));
 
   const fullKPText = useMemo(() => buildKPPlainText(emailGreeting, variants, EMAIL_SIGNATURE, showDeparture, usdRate), [variants, emailGreeting, showDeparture, usdRate]);
-  const fullKPHtml = useMemo(() => buildKPEmailHtml(emailGreeting, variants, EMAIL_SIGNATURE, showDeparture, "http://80.71.159.26/logo.png", usdRate), [variants, emailGreeting, showDeparture, usdRate]);
+  const fullKPHtml = useMemo(() => buildKPEmailHtml(emailGreeting, variants, EMAIL_SIGNATURE, showDeparture, LOGO_URL, usdRate), [variants, emailGreeting, showDeparture, usdRate]);
 
   const saveKP = () => {
     const lead = leads.find(l => l.id === leadId);

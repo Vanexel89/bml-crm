@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Badge, Chip, Combobox } from './ui.jsx';
 import { TouchRow } from './TouchRow.jsx';
 import { AIPanel } from './AIPanel.jsx';
-import { C, STATUS, GRADE, OBJECTION_TREE, OBJECTION_SCRIPTS, SPIN_QUESTIONS, CHALLENGER_INSIGHTS, OUTCOMES, EMAIL_TEMPLATES, EMAIL_SIGNATURE } from '../constants.js';
+import { C, STATUS, GRADE, OBJECTION_TREE, OBJECTION_SCRIPTS, SPIN_QUESTIONS, CHALLENGER_INSIGHTS, OUTCOMES, EMAIL_TEMPLATES, EMAIL_SIGNATURE, LOGO_URL } from '../constants.js';
 import { uid, today, fmt, fmtFull, addDays, calcGrade } from '../utils.js';
 import { apiCall } from '../api.js';
 import { calcChain } from '../rates/calcChain.js';
@@ -460,7 +460,7 @@ export function LeadDetail({ leads, touches, activities, proposals, up, doTouch,
               try {
                 // Build HTML version with logo (public URL, not base64)
                 const sigParts = EMAIL_SIGNATURE.replace(/\n/g, "<br>").replace(/(http[s]?:\/\/[^\s<]+)/g, '<a href="$1" style="color:#1a73e8;text-decoration:none;">$1</a>');
-                const logoHtml = `<img src="http://80.71.159.26/logo.png" alt="BML DV" style="height:40px;margin-bottom:8px;" /><br>`;
+                const logoHtml = `<img src="${LOGO_URL}" alt="BML DV" style="height:40px;margin-bottom:8px;" /><br>`;
                 const sigIdx = emailDraft.body.indexOf("Best regards");
                 const mainBody = (sigIdx > 0 ? emailDraft.body.slice(0, sigIdx).trim() : emailDraft.body).replace(/\n/g, "<br>");
                 const html = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0;padding:0;font-family:Arial,Helvetica,sans-serif;"><div style="max-width:700px;margin:0 auto;"><div style="padding:24px 0;font-size:14px;line-height:1.7;color:#333;">${mainBody}</div><div style="border-top:1px solid #e8e8e8;padding:16px 0;font-size:12px;color:#888;line-height:1.6;">${logoHtml}${sigParts}</div></div></body></html>`;
