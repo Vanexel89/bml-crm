@@ -5,7 +5,7 @@ import { today, fmt } from '../utils.js';
 
 export function TouchRow({ t, doTouch }) {
   const [open, setOpen] = useState(false);
-  const [phase, setPhase] = useState("outcome"); // outcome | objection | laer | callback | reject
+  const [phase, setPhase] = useState("outcome"); // outcome | objection | laer | callback | reject | redirect
   const [selObjKey, setSelObjKey] = useState(null);
   const [laerStep, setLaerStep] = useState(0); // 0=L,1=A,2=E,3=R
   const [callbackDays, setCallbackDays] = useState(2);
@@ -14,6 +14,8 @@ export function TouchRow({ t, doTouch }) {
   const [note, setNote] = useState("");
   const [customObj, setCustomObj] = useState("");
   const [showChallenger, setShowChallenger] = useState(false);
+  const [redirectEmail, setRedirectEmail] = useState("");
+  const [redirectNote, setRedirectNote] = useState("");
 
   const d = today();
   const over = t.status === "scheduled" && t.date < d;
@@ -22,7 +24,7 @@ export function TouchRow({ t, doTouch }) {
   const tc = t.type === "call" ? "#0F6E56" : t.type === "email" ? "#185FA5" : "#534AB7";
   const tbg = t.type === "call" ? "#E1F5EE" : t.type === "email" ? "#E6F1FB" : "#EEEDFE";
 
-  const reset = () => { setPhase("outcome"); setSelObjKey(null); setLaerStep(0); setNote(""); setCustomObj(""); setCallbackDays(2); setRejectReason(""); setRejectAction("frozen"); setShowChallenger(false); setOpen(false); };
+  const reset = () => { setPhase("outcome"); setSelObjKey(null); setLaerStep(0); setNote(""); setCustomObj(""); setCallbackDays(2); setRejectReason(""); setRejectAction("frozen"); setShowChallenger(false); setRedirectEmail(""); setRedirectNote(""); setOpen(false); };
 
   const submit = (outcome, extra) => {
     const fullNote = [note, extra].filter(Boolean).join(" | ");
@@ -31,6 +33,8 @@ export function TouchRow({ t, doTouch }) {
       callbackDays: outcome === "callback" ? callbackDays : null,
       rejectReason: outcome === "rejected" ? rejectReason : null,
       rejectAction: outcome === "rejected" ? rejectAction : null,
+      newEmail: outcome === "redirect" ? redirectEmail : null,
+      redirectNote: outcome === "redirect" ? redirectNote : null,
     });
     reset();
   };
@@ -127,16 +131,18 @@ export function TouchRow({ t, doTouch }) {
                       ["interested", OUTCOMES.interested],
                       ["objection", OUTCOMES.objection],
                       ["callback", OUTCOMES.callback],
+                      ["redirect", OUTCOMES.redirect],
                       ["dial_fail", OUTCOMES.dial_fail],
                       ["no_answer", { ...OUTCOMES.no_answer, l: "Говорил, без толку" }],
                       ["rejected", OUTCOMES.rejected],
-                    ] : Object.entries(OUTCOMES).filter(([k]) => k !== "sent" && k !== "dial_fail")
+                    ] : Object.entries(OUTCOMES).filter(([k]) => k !== "sent" && k !== "dial_fail" && k !== "redirect")
                     ).map(([k, v]) => (
                       <button key={k} style={{ ...C.btn(), fontSize: 11, padding: "5px 10px", borderColor: v.c, color: v.c }}
                         onClick={() => {
                           if (k === "interested") submit("interested");
                           else if (k === "objection") setPhase("objection");
                           else if (k === "callback") setPhase("callback");
+                          else if (k === "redirect") setPhase("redirect");
                           else if (k === "dial_fail") submit("dial_fail", "Недозвон");
                           else if (k === "no_answer") submit("no_answer");
                           else if (k === "rejected") setPhase("reject");
@@ -274,6 +280,23 @@ export function TouchRow({ t, doTouch }) {
                 <input style={{ ...C.inp, flex: 1, fontSize: 11, padding: "4px 8px" }} value={note} onChange={e => setNote(e.target.value)} placeholder="Комментарий" />
                 <button style={{ ...C.btn(true), fontSize: 11, padding: "4px 10px" }} onClick={() => submit("rejected", `Отказ: ${REJECTION_REASONS.find(r => r.id === rejectReason)?.l || "без причины"}`)} disabled={!rejectReason}>
                   Подтвердить
+                </button>
+                <button style={{ ...C.btn(), fontSize: 11, padding: "4px 8px" }} onClick={() => setPhase("outcome")}>← Назад</button>
+              </div>
+            </div>
+          )}
+
+          {/* Phase: redirect */}
+          {phase === "redirect" && (
+            <div>
+              <div style={{ fontSize: 11, color: "#0F6E56", marginBottom: 6, fontWeight: 500 }}>↪ Переадресация — ЛПР сменился / общая почта</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 8 }}>
+                <input style={{ ...C.inp, fontSize: 11, padding: "5px 8px" }} value={redirectEmail} onChange={e => setRedirectEmail(e.target.value)} placeholder="Email (logistics@company.ru)" />
+                <input style={{ ...C.inp, fontSize: 11, padding: "5px 8px" }} value={redirectNote} onChange={e => setRedirectNote(e.target.value)} placeholder="Кто направил, имя нового ЛПР и т.д." />
+              </div>
+              <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                <button style={{ ...C.btn(true), fontSize: 11, padding: "4px 10px" }} onClick={() => submit("redirect", `Переадресация${redirectEmail ? ": " + redirectEmail : ""}${redirectNote ? " | " + redirectNote : ""}`)}>
+                  ✓ Сохранить → задача email
                 </button>
                 <button style={{ ...C.btn(), fontSize: 11, padding: "4px 8px" }} onClick={() => setPhase("outcome")}>← Назад</button>
               </div>

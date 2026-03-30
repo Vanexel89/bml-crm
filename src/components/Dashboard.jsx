@@ -182,7 +182,7 @@ export function Dashboard({ leads, touches, activities, proposals, doTouch, setS
             {at === t.id ? (
               <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
                 <select style={{ ...C.sel, fontSize: 11, padding: "4px 6px" }} value={oc} onChange={e => setOc(e.target.value)}>
-                  <option value="no_answer">Нет ответа</option><option value="interested">Заинтересован</option><option value="callback">Перезвонить</option><option value="rejected">Отказ</option>
+                  <option value="no_answer">Нет ответа</option><option value="interested">Заинтересован</option><option value="callback">Перезвонить</option><option value="redirect">Переадресация</option><option value="rejected">Отказ</option>
                 </select>
                 <input style={{ ...C.inp, width: 110, fontSize: 11, padding: "4px 7px" }} placeholder="Заметка" value={nt} onChange={e => setNt(e.target.value)} />
                 <button style={C.btn(true)} onClick={() => { doTouch(t.id, oc, nt); setAt(null); setNt(""); setOc("no_answer"); }}>OK</button>

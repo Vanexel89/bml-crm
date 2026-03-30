@@ -181,6 +181,31 @@ export function App({ onLogout }) {
       }
     }
 
+    else if (outcome === "redirect") {
+      // ЛПР сменился / переадресация на общую почту
+      // Touch is done (counted in KPI), create email task for today
+      up("touches", p => [...p, {
+        id: uid(), lead_id: lid, num: maxNum() + 0.5,
+        type: "email", label: "Email на общую почту",
+        desc: "Отправить письмо-представление (шаблон logistics_intro)",
+        hint: "Используй шаблон «Письмо для отдела логистики» из карточки лида. После отправки — задача звонок через 2 дня.",
+        challenger: "", spin_focus: null,
+        date: d, done: null, status: "scheduled", outcome: null, note: "",
+      }]);
+      // Save redirect info in lead
+      if (extra.newEmail) {
+        up("leads", p => p.map(l => l.id === lid ? {
+          ...l,
+          redirect_email: extra.newEmail,
+          emails_raw: [...new Set([...(l.emails_raw || []), extra.newEmail])],
+          emails_kp: [...new Set([...(l.emails_kp || []), extra.newEmail])],
+        } : l));
+      }
+      if (extra.redirectNote) {
+        up("activities", p => [...p, { id: uid(), lead_id: lid, type: "note", content: `Переадресация: ${extra.redirectNote}`, outcome: "redirect", at: new Date().toISOString() }]);
+      }
+    }
+
   }, [data.touches, data.leads, up]);
 
   // ─── Auto-unfreeze after 30 days → REACTIVATION touches (not standard 7) ───
