@@ -81,25 +81,52 @@ export function LeadDetail({ leads, touches, activities, proposals, up, doTouch,
         {lead.comment && <div style={{ fontSize: 11, color: "var(--color-text-tertiary)", marginTop: 4, fontStyle: "italic" }}>{lead.comment}</div>}
 
         {/* Active objection display with LAER */}
-        {lead.objections && (() => {
+        {(() => {
           const objKey = lead.objections;
-          const obj = OBJECTION_TREE[objKey];
+          const obj = objKey ? OBJECTION_TREE[objKey] : null;
+          const objKeys = Object.keys(OBJECTION_TREE);
+          const clearObj = () => up("leads", p => p.map(l => l.id === sel ? { ...l, objections: null, last_objection: null } : l));
+          const setObj = (k) => up("leads", p => p.map(l => l.id === sel ? { ...l, objections: k || null, last_objection: k || l.last_objection, last_objection_date: k ? new Date().toISOString().slice(0, 10) : l.last_objection_date } : l));
+
+          if (!objKey) return (
+            <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 6 }}>
+              <select style={{ ...C.sel, fontSize: 11, padding: "3px 6px", width: "auto" }} value="" onChange={e => setObj(e.target.value)}>
+                <option value="">+ Возражение...</option>
+                {objKeys.map(k => <option key={k} value={k}>{k}</option>)}
+              </select>
+            </div>
+          );
+
           if (!obj) {
-            // Fallback for legacy objection strings
             const matches = Object.entries(OBJECTION_SCRIPTS).filter(([k]) => objKey.toLowerCase().includes(k.toLowerCase()));
-            return matches.length > 0 ? matches.map(([k,v]) => (
-              <div key={k} style={{ marginTop: 6, padding: "8px 12px", background: "#FEFCE8", border: "0.5px solid #FDE68A", borderRadius: 8, fontSize: 12 }}>
-                <div style={{ fontWeight: 600, color: "#854F0B", marginBottom: 3 }}>⚡ «{k}»</div>
-                <div style={{ color: "var(--color-text-primary)", marginBottom: 3 }}>{v.reply}</div>
-                <div style={{ color: "#854F0B", fontStyle: "italic", fontSize: 11 }}>💡 {v.tip}</div>
+            return (<div style={{ marginTop: 6 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                <Badge color="#854F0B" bg="#FAEEDA">⚡ {objKey}</Badge>
+                <select style={{ ...C.sel, fontSize: 10, padding: "2px 4px", width: "auto" }} value={objKey} onChange={e => setObj(e.target.value)}>
+                  <option value="">— Снять —</option>
+                  {objKeys.map(k => <option key={k} value={k}>{k}</option>)}
+                </select>
               </div>
-            )) : <Badge color="#854F0B" bg="#FAEEDA" style={{ marginTop: 6 }}>Возражение: {objKey}</Badge>;
+              {matches.map(([k,v]) => (
+                <div key={k} style={{ padding: "8px 12px", background: "#FEFCE8", border: "0.5px solid #FDE68A", borderRadius: 8, fontSize: 12 }}>
+                  <div style={{ color: "var(--color-text-primary)", marginBottom: 3 }}>{v.reply}</div>
+                  <div style={{ color: "#854F0B", fontStyle: "italic", fontSize: 11 }}>💡 {v.tip}</div>
+                </div>
+              ))}
+            </div>);
           }
+
           return (
             <div style={{ marginTop: 8 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }} onClick={() => setObjOpen(!objOpen)}>
-                <Badge color="#854F0B" bg="#FAEEDA">⚡ {objKey}</Badge>
-                <span style={{ fontSize: 11, color: "#854F0B" }}>{objOpen ? "▼" : "▶"} LAER-скрипт</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }} onClick={() => setObjOpen(!objOpen)}>
+                  <Badge color="#854F0B" bg="#FAEEDA">⚡ {objKey}</Badge>
+                  <span style={{ fontSize: 11, color: "#854F0B" }}>{objOpen ? "▼" : "▶"} LAER-скрипт</span>
+                </div>
+                <select style={{ ...C.sel, fontSize: 10, padding: "2px 4px", width: "auto", marginLeft: 4 }} value={objKey} onChange={e => setObj(e.target.value)}>
+                  <option value="">— Снять —</option>
+                  {objKeys.map(k => <option key={k} value={k}>{k}</option>)}
+                </select>
               </div>
               {objOpen && (
                 <div style={{ marginTop: 6, padding: "10px 12px", background: "#FEFCE8", border: "0.5px solid #FDE68A", borderRadius: 8 }}>
