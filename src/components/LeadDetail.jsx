@@ -320,7 +320,7 @@ export function LeadDetail({ leads, touches, activities, proposals, up, doTouch,
                           weight_surcharge: best.weightSurcharge || 0,
                           departure_date: best.departure || "",
                         };
-                        if (routes.length > 1) rateLines.push(`\nВариант ${ri + 1}:`);
+                        if (routes.length > 1 && ri > 0) rateLines.push("");
                         rateLines.push(formatKPVariant(v, ri, false, usdRate));
                       } else {
                         rateLines.push(`\n${route.port} -> ${route.city} (${route.ctype || "40HC"}): ставка не найдена`);
@@ -328,7 +328,7 @@ export function LeadDetail({ leads, touches, activities, proposals, up, doTouch,
                     });
                     const subj = tpl.subject_with_routes.replace("[город]", city);
                     const body = tpl.body_with_routes + "\n" + rateLines.join("\n") + "\n\nБуду рад обсудить детали.\n\n" + EMAIL_SIGNATURE;
-                    setEmailDraft({ subject: subj, body, to: (lead.emails_kp || []).join(", "), isLogisticsIntro: true });
+                    setEmailDraft({ subject: subj, body, to: (lead.emails_active || []).join(", "), isLogisticsIntro: true });
                   }}>✉ В письмо ({selectedRoutes.size})</button>
                 )}
               </div>
@@ -437,7 +437,7 @@ export function LeadDetail({ leads, touches, activities, proposals, up, doTouch,
           const city = lead.routes?.[0]?.city || "";
           const subj = hasRoutes ? tpl.subject_with_routes.replace("[город]", city) : tpl.subject;
           const body = (hasRoutes ? tpl.body_with_routes : tpl.body) + "\n\n" + EMAIL_SIGNATURE;
-          setEmailDraft({ subject: subj, body, to: (lead.emails_kp || []).join(", "), isLogisticsIntro: true });
+          setEmailDraft({ subject: subj, body, to: (lead.emails_active || []).join(", "), isLogisticsIntro: true });
         }}>📋 Отдел логистики</button>
         <button style={{ ...C.btn(), fontSize: 11, padding: "5px 10px" }} onClick={() => {
           const nm = lead.greeting_name || (lead.contact_name ? lead.contact_name.split(" ")[0] : "");
@@ -463,7 +463,7 @@ export function LeadDetail({ leads, touches, activities, proposals, up, doTouch,
                 const logoHtml = `<img src="http://80.71.159.26/logo.png" alt="BML DV" style="height:40px;margin-bottom:8px;" /><br>`;
                 const sigIdx = emailDraft.body.indexOf("Best regards");
                 const mainBody = (sigIdx > 0 ? emailDraft.body.slice(0, sigIdx).trim() : emailDraft.body).replace(/\n/g, "<br>");
-                const html = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;"><div style="max-width:700px;margin:20px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.1);"><div style="padding:24px 28px;font-size:14px;line-height:1.7;color:#333;">${mainBody}</div><div style="border-top:1px solid #e8e8e8;padding:16px 28px;font-size:12px;color:#888;line-height:1.6;">${logoHtml}${sigParts}</div></div></body></html>`;
+                const html = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0;padding:0;font-family:Arial,Helvetica,sans-serif;"><div style="max-width:700px;margin:0 auto;"><div style="padding:24px 0;font-size:14px;line-height:1.7;color:#333;">${mainBody}</div><div style="border-top:1px solid #e8e8e8;padding:16px 0;font-size:12px;color:#888;line-height:1.6;">${logoHtml}${sigParts}</div></div></body></html>`;
                 const res = await apiCall("POST", "/api/send", { to: emailDraft.to.split(",").map(s => s.trim()).filter(Boolean), subject: emailDraft.subject, body: emailDraft.body, html });
                 if (res.ok) {
                   up("activities", p => [...p, { id: uid(), lead_id: sel, type: "note", content: `📧 ${emailDraft.subject} → ${emailDraft.to}`, at: new Date().toISOString() }]);
