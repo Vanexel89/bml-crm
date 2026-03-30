@@ -372,7 +372,7 @@ export function LeadDetail({ leads, touches, activities, proposals, up, doTouch,
       {/* Email Composer */}
       <div style={{ ...C.section, marginTop: 14 }}>Написать письмо</div>
       <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 8 }}>
-        {Object.entries(EMAIL_TEMPLATES).map(([k, tpl]) => (
+        {Object.entries(EMAIL_TEMPLATES).filter(([k]) => k !== "logistics_intro").map(([k, tpl]) => (
           <button key={k} style={{ ...C.btn(), fontSize: 11, padding: "5px 10px" }} onClick={() => {
             const nm = lead.greeting_name || (lead.contact_name ? lead.contact_name.split(" ")[0] : "");
             const greeting = nm ? `${nm}, добрый день.` : "Добрый день.";
@@ -381,6 +381,15 @@ export function LeadDetail({ leads, touches, activities, proposals, up, doTouch,
             setEmailDraft({ subject: subj, body, to: (lead.emails_active || []).join(", ") });
           }}>{k === "no_answer" ? "📵 Недозвон" : k === "followup" ? "📩 Follow-up" : "📰 Инфоповод"}</button>
         ))}
+        <button style={{ ...C.btn(), fontSize: 11, padding: "5px 10px", borderColor: "#0F6E56", color: "#0F6E56" }} onClick={() => {
+          const tpl = EMAIL_TEMPLATES.logistics_intro;
+          const hasRoutes = (lead.routes || []).length > 0;
+          const city = lead.routes?.[0]?.city || "";
+          const subj = hasRoutes ? tpl.subject_with_routes.replace("[город]", city) : tpl.subject;
+          const body = (hasRoutes ? tpl.body_with_routes : tpl.body) + "\n\n" + EMAIL_SIGNATURE;
+          const emails = (lead.emails_kp || []).concat(lead.emails_raw || []);
+          setEmailDraft({ subject: subj, body, to: [...new Set(emails)].join(", "), isLogisticsIntro: true });
+        }}>📋 Отдел логистики</button>
         <button style={{ ...C.btn(), fontSize: 11, padding: "5px 10px" }} onClick={() => {
           const nm = lead.greeting_name || (lead.contact_name ? lead.contact_name.split(" ")[0] : "");
           const greeting = nm ? `${nm}, добрый день.` : "Добрый день.";
@@ -403,8 +412,25 @@ export function LeadDetail({ leads, touches, activities, proposals, up, doTouch,
                 const res = await apiCall("POST", "/api/send", { to: emailDraft.to.split(",").map(s => s.trim()).filter(Boolean), subject: emailDraft.subject, body: emailDraft.body });
                 if (res.ok) {
                   up("activities", p => [...p, { id: uid(), lead_id: sel, type: "note", content: `📧 ${emailDraft.subject} → ${emailDraft.to}`, at: new Date().toISOString() }]);
+                  // Auto-task: call in 2 days after logistics_intro
+                  if (emailDraft.isLogisticsIntro) {
+                    const maxNum = touches.filter(t => t.lead_id === sel).reduce((m, t) => Math.max(m, t.num || 0), 0);
+                    up("touches", p => [...p, {
+                      id: uid(), lead_id: sel, num: maxNum + 0.5,
+                      type: "call", label: "Звонок после письма",
+                      desc: "Проверить получили ли письмо, найти ЛПР",
+                      hint: "«Добрый день, отправляли письмо на вашу почту по контейнерным перевозкам — дошло? Подскажите, кто у вас занимается логистикой?»",
+                      challenger: "", spin_focus: null,
+                      date: addDays(today(), 2), done: null, status: "scheduled", outcome: null, note: "",
+                    }]);
+                    // Mark any pending 'Email на общую почту' task as done
+                    const emailTask = touches.find(t => t.lead_id === sel && t.status === "scheduled" && t.label === "Email на общую почту");
+                    if (emailTask) {
+                      up("touches", p => p.map(t => t.id === emailTask.id ? { ...t, status: "done", done: today(), outcome: "sent", note: "Отправлено: " + emailDraft.subject } : t));
+                    }
+                  }
                   setEmailDraft(null);
-                  alert("Отправлено на " + emailDraft.to);
+                  alert("Отправлено на " + emailDraft.to + (emailDraft.isLogisticsIntro ? "\nЗадача: звонок через 2 дня" : ""));
                 } else { alert("Ошибка: " + (res.error || "неизвестная")); }
               } catch (err) { alert("Ошибка сети: " + err.message); }
               setEmailSending(false);
